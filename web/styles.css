@@ -1,0 +1,106 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: #ffffff;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.container {
+  text-align: center;
+  padding: 40px;
+}
+
+.logo h1 {
+  font-size: 4rem;
+  font-weight: 300;
+  letter-spacing: 0.2em;
+  margin-bottom: 60px;
+  color: #e94560;
+}
+
+.clock {
+  font-size: 10rem;
+  font-weight: 200;
+  letter-spacing: 0.05em;
+  margin-bottom: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.date {
+  font-size: 2.5rem;
+  font-weight: 300;
+  color: #a0a0a0;
+  margin-bottom: 80px;
+  text-transform: capitalize;
+}
+
+.status-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+}
+
+.connection-indicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #ffc107;
+  animation: pulse 2s infinite;
+}
+
+.connection-indicator.connected {
+  background-color: #4caf50;
+  animation: none;
+}
+
+.connection-indicator.reconnecting {
+  background-color: #ffc107;
+  animation: pulse 1s infinite;
+}
+
+.connection-indicator.offline {
+  background-color: #f44336;
+  animation: pulse 0.5s infinite;
+}
+
+.status-text {
+  font-size: 1.5rem;
+  font-weight: 300;
+  color: #a0a0a0;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+@media (max-width: 768px) {
+  .logo h1 {
+    font-size: 2.5rem;
+  }
+
+  .clock {
+    font-size: 5rem;
+  }
+
+  .date {
+    font-size: 1.5rem;
+  }
+}

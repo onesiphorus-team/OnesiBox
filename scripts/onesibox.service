@@ -1,0 +1,16 @@
+[Unit]
+Description=OnesiBox Client
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/usr/bin/node /opt/onesibox/src/main.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+WorkingDirectory=/opt/onesibox
+
+[Install]
+WantedBy=graphical.target

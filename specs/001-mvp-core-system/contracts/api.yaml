@@ -1,0 +1,348 @@
+# OnesiBox Client API Contracts
+# These are the server endpoints CONSUMED by the OnesiBox client
+# The Onesiforo server implements these endpoints
+
+openapi: 3.0.3
+info:
+  title: Onesiforo Server API (Client Perspective)
+  description: API endpoints consumed by OnesiBox client for command polling, heartbeat, and acknowledgment
+  version: 1.0.0
+
+servers:
+  - url: https://onesiforo.example.com/api/v1
+    description: Production server
+
+security:
+  - bearerAuth: []
+  - applianceId: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Appliance authentication token
+    applianceId:
+      type: apiKey
+      in: header
+      name: X-Appliance-ID
+      description: Appliance UUID
+
+  schemas:
+    Command:
+      type: object
+      required:
+        - id
+        - type
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        type:
+          type: string
+          enum:
+            - play_media
+            - stop_media
+            - pause_media
+            - resume_media
+            - set_volume
+            - join_zoom
+            - leave_zoom
+        payload:
+          type: object
+          description: Type-specific command parameters
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    PlayMediaPayload:
+      type: object
+      required:
+        - url
+        - media_type
+      properties:
+        url:
+          type: string
+          format: uri
+          example: "https://www.jw.org/finder?docid=..."
+        media_type:
+          type: string
+          enum: [video, audio]
+        autoplay:
+          type: boolean
+          default: true
+        start_position:
+          type: number
+          minimum: 0
+          default: 0
+          description: Start position in seconds
+
+    SetVolumePayload:
+      type: object
+      required:
+        - level
+      properties:
+        level:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    JoinZoomPayload:
+      type: object
+      required:
+        - meeting_url
+      properties:
+        meeting_url:
+          type: string
+          format: uri
+          example: "https://zoom.us/j/123456789?pwd=abc123"
+        meeting_id:
+          type: string
+        password:
+          type: string
+
+    Heartbeat:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [idle, playing, calling, error]
+        current_media:
+          $ref: '#/components/schemas/MediaInfo'
+        cpu_usage:
+          type: number
+          minimum: 0
+          maximum: 100
+        memory_usage:
+          type: number
+          minimum: 0
+          maximum: 100
+        disk_usage:
+          type: number
+          minimum: 0
+          maximum: 100
+        temperature:
+          type: number
+          description: CPU temperature in Celsius
+        uptime:
+          type: integer
+          description: Device uptime in seconds
+        timestamp:
+          type: string
+          format: date-time
+
+    MediaInfo:
+      type: object
+      nullable: true
+      properties:
+        url:
+          type: string
+          format: uri
+        media_type:
+          type: string
+          enum: [video, audio]
+        position:
+          type: number
+          description: Current position in seconds
+        duration:
+          type: number
+          nullable: true
+          description: Total duration in seconds
+
+    CommandAck:
+      type: object
+      required:
+        - status
+        - executed_at
+      properties:
+        status:
+          type: string
+          enum: [success, failed, skipped]
+        error_code:
+          type: string
+          nullable: true
+          description: Error code if status is failed
+        error_message:
+          type: string
+          nullable: true
+          description: Human-readable error message
+        executed_at:
+          type: string
+          format: date-time
+
+    HeartbeatResponse:
+      type: object
+      properties:
+        server_time:
+          type: string
+          format: date-time
+        next_heartbeat:
+          type: integer
+          description: Suggested interval for next heartbeat in seconds
+
+    CommandsResponse:
+      type: object
+      properties:
+        commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/Command'
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+paths:
+  /appliances/{applianceId}/commands:
+    get:
+      summary: Get pending commands
+      description: Retrieve commands with status=pending for this appliance
+      operationId: getCommands
+      parameters:
+        - name: applianceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending]
+            default: pending
+      responses:
+        '200':
+          description: List of pending commands
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandsResponse'
+        '401':
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Appliance not authorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /appliances/{applianceId}/heartbeat:
+    post:
+      summary: Send heartbeat
+      description: Send periodic status update to server
+      operationId: sendHeartbeat
+      parameters:
+        - name: applianceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Heartbeat'
+      responses:
+        '200':
+          description: Heartbeat received
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '401':
+          description: Invalid or expired token
+
+  /commands/{commandId}/ack:
+    post:
+      summary: Acknowledge command execution
+      description: Report the result of command execution
+      operationId: acknowledgeCommand
+      parameters:
+        - name: commandId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandAck'
+      responses:
+        '200':
+          description: Acknowledgment received
+        '401':
+          description: Invalid or expired token
+        '404':
+          description: Command not found
+
+  /appliances/{applianceId}/playback:
+    post:
+      summary: Update playback status
+      description: Report media playback events
+      operationId: updatePlayback
+      parameters:
+        - name: applianceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - event
+              properties:
+                event:
+                  type: string
+                  enum: [started, paused, resumed, stopped, completed, error]
+                media_url:
+                  type: string
+                  format: uri
+                media_type:
+                  type: string
+                  enum: [audio, video]
+                position:
+                  type: number
+                duration:
+                  type: number
+                  nullable: true
+                error_message:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: Playback status received
+        '401':
+          description: Invalid or expired token
