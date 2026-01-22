@@ -1,6 +1,6 @@
 const EventEmitter = require('events');
 const logger = require('../logging/logger');
-const { validateCommand, getErrorCodeForValidation } = require('./validator');
+const { validateCommand, getErrorCodeForValidation, getErrorCodeForCommandType, ERROR_CODES } = require('./validator');
 const { stateManager, STATUS } = require('../state/state-manager');
 
 const COMMAND_PRIORITY = {
@@ -44,7 +44,7 @@ class CommandManager extends EventEmitter {
       logger.error('No handler for command type', { type: command.type });
       await this._sendAck(command.id, {
         status: 'failed',
-        error_code: 'E003',
+        error_code: ERROR_CODES.UNKNOWN_COMMAND_TYPE,
         error_message: `No handler registered for ${command.type}`
       });
       return;
@@ -78,10 +78,9 @@ class CommandManager extends EventEmitter {
         error: error.message
       });
 
-      const errorCode = this._getErrorCodeForType(command.type);
       await this._sendAck(command.id, {
         status: 'failed',
-        error_code: errorCode,
+        error_code: getErrorCodeForCommandType(command.type),
         error_message: error.message
       });
       this.emit('commandExecuted', { command, status: 'failed', error });
@@ -119,23 +118,6 @@ class CommandManager extends EventEmitter {
         commandId,
         error: error.message
       });
-    }
-  }
-
-  _getErrorCodeForType(commandType) {
-    switch (commandType) {
-      case 'play_media':
-      case 'stop_media':
-      case 'pause_media':
-      case 'resume_media':
-        return 'E006';
-      case 'join_zoom':
-      case 'leave_zoom':
-        return 'E007';
-      case 'set_volume':
-        return 'E008';
-      default:
-        return 'E004';
     }
   }
 }
