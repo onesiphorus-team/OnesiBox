@@ -149,14 +149,28 @@ class BrowserController {
   /**
    * Launch Chromium browser with a URL safely.
    * Uses spawn to prevent shell injection.
+   * Launches in kiosk mode for fullscreen without decorations.
    *
    * @param {string} url - The URL to open
    * @private
    */
   async _launchBrowser(url) {
     return new Promise((resolve, reject) => {
+      // Kiosk mode flags for fullscreen without decorations
+      const chromiumArgs = [
+        '--kiosk',                              // Fullscreen kiosk mode
+        '--noerrdialogs',                       // No error dialogs
+        '--disable-infobars',                   // No info bars
+        '--no-first-run',                       // Skip first run wizard
+        '--autoplay-policy=no-user-gesture-required', // Allow autoplay
+        '--disable-session-crashed-bubble',    // No crash bubbles
+        '--disable-features=TranslateUI',      // No translate popup
+        '--check-for-update-interval=31536000', // Disable update check
+        url
+      ];
+
       // Use spawn with detached option instead of exec with '&'
-      const child = spawn('chromium-browser', [url], {
+      const child = spawn('chromium-browser', chromiumArgs, {
         detached: true,
         stdio: 'ignore'
       });

@@ -189,19 +189,61 @@
       video.addEventListener('loadeddata', () => console.log('Video loadeddata'));
       video.addEventListener('canplay', () => {
         console.log('Video canplay - attempting to play');
-        video.play().catch(err => {
-          console.error('Play failed:', err);
-          showError(`Impossibile avviare il video: ${err.message}`);
-        });
+        forcePlay(video);
       });
 
       container.innerHTML = '';
       container.appendChild(video);
 
-      // Request fullscreen
-      video.requestFullscreen().catch(() => {
-        console.log('Could not enter fullscreen');
-      });
+      // Request fullscreen immediately
+      requestFullscreen(video);
+    }
+
+    /**
+     * Force video to play with multiple attempts
+     */
+    async function forcePlay(video) {
+      try {
+        await video.play();
+        console.log('Autoplay succeeded');
+      } catch (err) {
+        console.warn('Autoplay blocked, trying muted:', err.message);
+        video.muted = true;
+        try {
+          await video.play();
+          console.log('Muted autoplay succeeded, will unmute on interaction');
+          // Add click handler to unmute
+          document.body.addEventListener('click', () => {
+            video.muted = false;
+            console.log('Unmuted after user interaction');
+          }, { once: true });
+        } catch (err2) {
+          console.error('Even muted autoplay failed:', err2);
+          showError(`Impossibile avviare il video: ${err2.message}`);
+        }
+      }
+    }
+
+    /**
+     * Request fullscreen with fallbacks
+     */
+    function requestFullscreen(element) {
+      const methods = [
+        'requestFullscreen',
+        'webkitRequestFullscreen',
+        'mozRequestFullScreen',
+        'msRequestFullscreen'
+      ];
+
+      for (const method of methods) {
+        if (element[method]) {
+          element[method]().catch(() => {
+            console.log('Fullscreen request failed, trying document');
+            document.documentElement[method]?.().catch(() => {});
+          });
+          return;
+        }
+      }
     }
 
     /**
