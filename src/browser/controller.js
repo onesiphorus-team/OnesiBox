@@ -69,9 +69,39 @@ class BrowserController {
 
   /**
    * Navigate back to the standby screen.
+   * Kills existing Chromium and relaunches to ensure clean state.
    */
   async goToStandby() {
-    await this.navigateTo(STANDBY_URL);
+    await this.restartBrowser(STANDBY_URL);
+  }
+
+  /**
+   * Kill all Chromium processes and relaunch with a URL.
+   * Ensures clean state with no background playback.
+   *
+   * @param {string} url - The URL to open after restart
+   */
+  async restartBrowser(url = STANDBY_URL) {
+    logger.info('Restarting browser', { url });
+
+    try {
+      // Kill all chromium processes
+      await execFileAsync('pkill', ['-f', 'chromium']).catch(() => {
+        // Ignore errors if no chromium is running
+      });
+
+      // Wait for processes to terminate
+      await this._delay(500);
+
+      // Launch fresh browser
+      await this._launchBrowser(url);
+      this.currentUrl = url;
+
+      logger.info('Browser restarted successfully');
+    } catch (error) {
+      logger.error('Failed to restart browser', { error: error.message });
+      throw error;
+    }
   }
 
   /**
