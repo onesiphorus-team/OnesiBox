@@ -195,6 +195,14 @@ async function main() {
     logger.info('HTTP server started', { port: PORT });
   });
 
+  // Launch browser with standby screen on startup
+  try {
+    logger.info('Launching browser with standby screen...');
+    await browserController.goToStandby();
+  } catch (error) {
+    logger.warn('Could not launch browser at startup', { error: error.message });
+  }
+
   await startPolling();
   await startHeartbeat();
 
