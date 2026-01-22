@@ -11,7 +11,8 @@ const ERROR_CODES = {
   ZOOM_HANDLER_FAILED: 'E007',
   VOLUME_HANDLER_FAILED: 'E008',
   COMMAND_EXPIRED: 'E009',
-  INVALID_PAYLOAD: 'E010'
+  INVALID_PAYLOAD: 'E010',
+  SYSTEM_HANDLER_FAILED: 'E011'
 };
 
 /**
@@ -47,7 +48,9 @@ const COMMAND_TYPES = [
   'resume_media',
   'set_volume',
   'join_zoom',
-  'leave_zoom'
+  'leave_zoom',
+  'reboot',
+  'shutdown'
 ];
 
 /**
@@ -241,6 +244,19 @@ function validateCommand(command) {
         errors.push('join_zoom meeting_url must be a valid Zoom URL');
       }
       break;
+
+    case 'reboot':
+    case 'shutdown':
+      // Optional delay parameter validation
+      if (command.payload?.delay !== undefined) {
+        if (typeof command.payload.delay !== 'number' ||
+            !Number.isFinite(command.payload.delay) ||
+            command.payload.delay < 0 ||
+            command.payload.delay > 3600) {
+          errors.push(`${command.type} delay must be 0-3600 seconds`);
+        }
+      }
+      break;
   }
 
   if (errors.length > 0) {
@@ -290,6 +306,9 @@ function getErrorCodeForCommandType(commandType) {
       return ERROR_CODES.ZOOM_HANDLER_FAILED;
     case 'set_volume':
       return ERROR_CODES.VOLUME_HANDLER_FAILED;
+    case 'reboot':
+    case 'shutdown':
+      return ERROR_CODES.SYSTEM_HANDLER_FAILED;
     default:
       return ERROR_CODES.INVALID_COMMAND_STRUCTURE;
   }

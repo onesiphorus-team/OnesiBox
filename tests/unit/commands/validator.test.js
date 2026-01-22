@@ -109,5 +109,51 @@ describe('Command Validator', () => {
       expect(result.valid).toBe(false);
       expect(result.errors).toContain('Command has expired');
     });
+
+    it('should validate reboot command', () => {
+      const valid = validateCommand({
+        id: '123',
+        type: 'reboot',
+        payload: {}
+      });
+      expect(valid.valid).toBe(true);
+
+      const withDelay = validateCommand({
+        id: '123',
+        type: 'reboot',
+        payload: { delay: 60 }
+      });
+      expect(withDelay.valid).toBe(true);
+
+      const invalidDelay = validateCommand({
+        id: '123',
+        type: 'reboot',
+        payload: { delay: 5000 }
+      });
+      expect(invalidDelay.valid).toBe(false);
+    });
+
+    it('should validate shutdown command', () => {
+      const valid = validateCommand({
+        id: '123',
+        type: 'shutdown',
+        payload: {}
+      });
+      expect(valid.valid).toBe(true);
+
+      const withDelay = validateCommand({
+        id: '123',
+        type: 'shutdown',
+        payload: { delay: 120 }
+      });
+      expect(withDelay.valid).toBe(true);
+
+      const invalidDelay = validateCommand({
+        id: '123',
+        type: 'shutdown',
+        payload: { delay: -10 }
+      });
+      expect(invalidDelay.valid).toBe(false);
+    });
   });
 });

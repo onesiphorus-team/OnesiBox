@@ -129,6 +129,8 @@ onesibox-client/
 
 | Comando | Priorità | Descrizione |
 |---------|----------|-------------|
+| `reboot` | 1 (alta) | Riavvia il dispositivo |
+| `shutdown` | 1 (alta) | Spegne il dispositivo |
 | `join_zoom` | 1 (alta) | Partecipa a riunione Zoom |
 | `leave_zoom` | 1 (alta) | Lascia riunione Zoom |
 | `play_media` | 2 (media) | Riproduce video/audio da JW.org |

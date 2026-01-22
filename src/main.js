@@ -146,16 +146,26 @@ function registerHandlers() {
   const mediaHandler = require('./commands/handlers/media');
   const zoomHandler = require('./commands/handlers/zoom');
   const volumeHandler = require('./commands/handlers/volume');
+  const systemHandler = require('./commands/handlers/system');
 
   mediaHandler.setApiClient(apiClient);
 
+  // Media handlers
   commandManager.registerHandler('play_media', mediaHandler.playMedia);
   commandManager.registerHandler('stop_media', mediaHandler.stopMedia);
   commandManager.registerHandler('pause_media', mediaHandler.pauseMedia);
   commandManager.registerHandler('resume_media', mediaHandler.resumeMedia);
+
+  // Zoom handlers
   commandManager.registerHandler('join_zoom', zoomHandler.joinZoom);
   commandManager.registerHandler('leave_zoom', zoomHandler.leaveZoom);
+
+  // Volume handler
   commandManager.registerHandler('set_volume', volumeHandler.setVolume);
+
+  // System handlers
+  commandManager.registerHandler('reboot', systemHandler.reboot);
+  commandManager.registerHandler('shutdown', systemHandler.shutdown);
 }
 
 async function shutdown(signal) {
