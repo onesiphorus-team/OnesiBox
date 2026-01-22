@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const logger = require('./logging/logger');
+const watchdog = require('./watchdog');
 const { loadConfig } = require('./config/config');
 const { stateManager, CONNECTION_STATUS } = require('./state/state-manager');
 const ApiClient = require('./communication/api-client');
@@ -160,6 +161,9 @@ function registerHandlers() {
 async function shutdown(signal) {
   logger.info('Shutting down', { signal });
 
+  // Notify systemd we're stopping
+  watchdog.stopping();
+
   if (pollingInterval) clearInterval(pollingInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
 
@@ -208,6 +212,11 @@ async function main() {
 
   stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
   logger.info('OnesiBox ready');
+
+  // Notify systemd we're ready and start watchdog pings
+  watchdog.ready();
+  watchdog.startPinging();
+  watchdog.status('Running - connected to server');
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));

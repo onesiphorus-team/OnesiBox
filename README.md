@@ -246,8 +246,46 @@ zoom.us, *.zoom.us
 
 - **Backoff esponenziale**: 5s → 10s → 20s → 60s (max)
 - **Auto-recovery**: Da stato errore dopo 10 secondi
-- **systemd watchdog**: Restart automatico in caso di crash
+- **systemd watchdog**: Restart automatico in caso di crash o freeze
 - **Log rotation**: 50MB max, 7 giorni retention
+
+### Systemd Watchdog
+
+Il servizio utilizza il watchdog di systemd per garantire l'affidabilità:
+
+```ini
+[Service]
+Type=notify
+WatchdogSec=60
+NotifyAccess=main
+```
+
+**Come funziona:**
+
+1. **Notify**: Il servizio invia `READY=1` a systemd quando è pronto
+2. **Ping**: Ogni 30 secondi (metà di `WatchdogSec`) invia `WATCHDOG=1`
+3. **Timeout**: Se systemd non riceve ping per 60 secondi, riavvia il servizio
+4. **Status**: Il servizio può aggiornare lo stato visualizzabile con `systemctl status`
+
+**Protezioni attive:**
+
+| Parametro | Valore | Descrizione |
+|-----------|--------|-------------|
+| `WatchdogSec` | 60s | Timeout watchdog |
+| `Restart` | always | Riavvia sempre in caso di crash |
+| `RestartSec` | 10s | Attesa prima del riavvio |
+| `StartLimitBurst` | 5 | Max 5 riavvii... |
+| `StartLimitIntervalSec` | 300s | ...in 5 minuti |
+
+**Verifica stato watchdog:**
+
+```bash
+# Stato completo con timestamp watchdog
+sudo systemctl status onesibox
+
+# Log dei riavvii
+journalctl -u onesibox | grep -E "(Started|Stopped|watchdog)"
+```
 
 ## Script NPM
 
