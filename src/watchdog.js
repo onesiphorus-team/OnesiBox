@@ -1,10 +1,9 @@
-const dgram = require('dgram');
-const fs = require('fs');
+const { execFile } = require('child_process');
 const logger = require('./logging/logger');
 
 /**
  * Systemd watchdog/notify integration.
- * Sends notifications to systemd via NOTIFY_SOCKET.
+ * Uses systemd-notify command for notifications.
  */
 class Watchdog {
   constructor() {
@@ -18,37 +17,24 @@ class Watchdog {
   }
 
   /**
-   * Send a notification to systemd.
-   * @param {string} message - The notification message
+   * Send a notification to systemd using systemd-notify command.
+   * @param {string[]} args - Arguments for systemd-notify
    */
-  _notify(message) {
+  _notify(args) {
     if (!this.enabled) return;
 
-    try {
-      // Handle abstract socket (starts with @)
-      const socketPath = this.socketPath.startsWith('@')
-        ? '\0' + this.socketPath.slice(1)
-        : this.socketPath;
-
-      const socket = dgram.createSocket('unix_dgram');
-      const buffer = Buffer.from(message);
-
-      socket.send(buffer, 0, buffer.length, socketPath, (err) => {
-        socket.close();
-        if (err) {
-          logger.warn('Failed to send systemd notification', { error: err.message });
-        }
-      });
-    } catch (error) {
-      logger.warn('Watchdog notification error', { error: error.message });
-    }
+    execFile('systemd-notify', args, (err) => {
+      if (err) {
+        logger.warn('Failed to send systemd notification', { error: err.message, args });
+      }
+    });
   }
 
   /**
    * Notify systemd that the service is ready.
    */
   ready() {
-    this._notify('READY=1');
+    this._notify(['--ready']);
     logger.info('Sent READY notification to systemd');
   }
 
@@ -56,7 +42,7 @@ class Watchdog {
    * Send watchdog keepalive ping.
    */
   ping() {
-    this._notify('WATCHDOG=1');
+    this._notify(['WATCHDOG=1']);
   }
 
   /**
@@ -64,7 +50,7 @@ class Watchdog {
    * @param {string} status - Status message
    */
   status(status) {
-    this._notify(`STATUS=${status}`);
+    this._notify([`--status=${status}`]);
   }
 
   /**
@@ -108,7 +94,7 @@ class Watchdog {
    * Notify systemd that the service is stopping.
    */
   stopping() {
-    this._notify('STOPPING=1');
+    this._notify(['STOPPING=1']);
     this.stopPinging();
   }
 }

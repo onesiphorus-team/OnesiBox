@@ -249,42 +249,39 @@ zoom.us, *.zoom.us
 - **systemd watchdog**: Restart automatico in caso di crash o freeze
 - **Log rotation**: 50MB max, 7 giorni retention
 
-### Systemd Watchdog
+### Systemd Auto-Restart
 
-Il servizio utilizza il watchdog di systemd per garantire l'affidabilità:
+Il servizio è configurato per riavviarsi automaticamente in caso di crash:
 
 ```ini
 [Service]
-Type=notify
-WatchdogSec=60
-NotifyAccess=main
+Type=simple
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
 ```
-
-**Come funziona:**
-
-1. **Notify**: Il servizio invia `READY=1` a systemd quando è pronto
-2. **Ping**: Ogni 30 secondi (metà di `WatchdogSec`) invia `WATCHDOG=1`
-3. **Timeout**: Se systemd non riceve ping per 60 secondi, riavvia il servizio
-4. **Status**: Il servizio può aggiornare lo stato visualizzabile con `systemctl status`
 
 **Protezioni attive:**
 
 | Parametro | Valore | Descrizione |
 |-----------|--------|-------------|
-| `WatchdogSec` | 60s | Timeout watchdog |
 | `Restart` | always | Riavvia sempre in caso di crash |
 | `RestartSec` | 10s | Attesa prima del riavvio |
 | `StartLimitBurst` | 5 | Max 5 riavvii... |
 | `StartLimitIntervalSec` | 300s | ...in 5 minuti |
 
-**Verifica stato watchdog:**
+**Verifica stato servizio:**
 
 ```bash
-# Stato completo con timestamp watchdog
+# Stato completo
 sudo systemctl status onesibox
 
 # Log dei riavvii
-journalctl -u onesibox | grep -E "(Started|Stopped|watchdog)"
+journalctl -u onesibox | grep -E "(Started|Stopped)"
+
+# Seguire i log in tempo reale
+journalctl -u onesibox -f
 ```
 
 ## Script NPM
