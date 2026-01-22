@@ -139,11 +139,20 @@
     function displayVideo(videoUrl, title) {
       const container = document.getElementById('container');
 
+      console.log('Creating video element with URL:', videoUrl);
+
       const video = document.createElement('video');
       video.autoplay = true;
+      video.muted = true; // Required for autoplay to work
       video.controls = false; // Kiosk mode - no controls
       video.playsInline = true;
       video.src = videoUrl;
+
+      // Unmute after playback starts (autoplay requires muted)
+      video.addEventListener('playing', () => {
+        console.log('Video playing, unmuting...');
+        video.muted = false;
+      }, { once: true });
 
       // Fullscreen on click
       video.addEventListener('click', () => {
@@ -156,6 +165,7 @@
 
       // Auto-fullscreen on play
       video.addEventListener('play', () => {
+        console.log('Video play event');
         if (!document.fullscreenElement) {
           video.requestFullscreen().catch(() => {});
         }
@@ -170,7 +180,19 @@
 
       video.addEventListener('error', (e) => {
         console.error('Video playback error:', e);
-        showError('Errore durante la riproduzione del video');
+        const errorCode = video.error ? video.error.code : 'unknown';
+        const errorMsg = video.error ? video.error.message : 'unknown';
+        showError(`Errore video: ${errorCode} - ${errorMsg}`);
+      });
+
+      video.addEventListener('loadstart', () => console.log('Video loadstart'));
+      video.addEventListener('loadeddata', () => console.log('Video loadeddata'));
+      video.addEventListener('canplay', () => {
+        console.log('Video canplay - attempting to play');
+        video.play().catch(err => {
+          console.error('Play failed:', err);
+          showError(`Impossibile avviare il video: ${err.message}`);
+        });
       });
 
       container.innerHTML = '';
