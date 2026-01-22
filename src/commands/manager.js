@@ -4,12 +4,18 @@ const { validateCommand, getErrorCodeForValidation, getErrorCodeForCommandType, 
 const { stateManager, STATUS } = require('../state/state-manager');
 
 const COMMAND_PRIORITY = {
+  // System commands - highest priority
+  reboot: 1,
+  shutdown: 1,
+  // Video calls - high priority
   join_zoom: 1,
   leave_zoom: 1,
+  // Media playback - medium priority
   play_media: 2,
   stop_media: 2,
   pause_media: 2,
   resume_media: 2,
+  // Settings - low priority
   set_volume: 3
 };
 
