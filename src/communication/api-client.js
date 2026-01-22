@@ -8,13 +8,15 @@ class ApiClient {
     this.config = config;
     this.consecutiveFailures = 0;
 
+    // The backend identifies the appliance via the Sanctum token,
+    // so we don't need to include the appliance ID in the URL
     this.client = axios.create({
       baseURL: `${config.server_url}/api/v1`,
       timeout: 10000,
       headers: {
         'Authorization': `Bearer ${config.appliance_token}`,
-        'X-Appliance-ID': config.appliance_id,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       }
     });
 
@@ -45,16 +47,25 @@ class ApiClient {
     return this.consecutiveFailures < BACKOFF_SCHEDULE.length + 3;
   }
 
+  /**
+   * Fetch pending commands from the backend.
+   * The backend identifies the appliance via the Sanctum token.
+   * Response format: { data: [...commands], meta: { total, pending } }
+   */
   async getCommands() {
-    const response = await this.client.get(
-      `/appliances/${this.config.appliance_id}/commands`,
-      { params: { status: 'pending' } }
-    );
-    return response.data.commands || [];
+    const response = await this.client.get('/appliances/commands', {
+      params: { status: 'pending' }
+    });
+    // Backend returns { data: [...], meta: {...} }
+    return response.data.data || [];
   }
 
-  async acknowledgeCommand(commandId, ack) {
-    await this.client.post(`/commands/${commandId}/ack`, {
+  /**
+   * Acknowledge command execution.
+   * Uses command UUID as the identifier.
+   */
+  async acknowledgeCommand(commandUuid, ack) {
+    await this.client.post(`/commands/${commandUuid}/ack`, {
       status: ack.status,
       error_code: ack.error_code || null,
       error_message: ack.error_message || null,
@@ -62,19 +73,21 @@ class ApiClient {
     });
   }
 
+  /**
+   * Send heartbeat with device metrics.
+   * The backend identifies the appliance via the Sanctum token.
+   */
   async sendHeartbeat(heartbeat) {
-    const response = await this.client.post(
-      `/appliances/${this.config.appliance_id}/heartbeat`,
-      heartbeat
-    );
+    const response = await this.client.post('/appliances/heartbeat', heartbeat);
     return response.data;
   }
 
+  /**
+   * Report playback events (started, paused, resumed, stopped, etc).
+   * The backend identifies the appliance via the Sanctum token.
+   */
   async reportPlaybackEvent(event) {
-    await this.client.post(
-      `/appliances/${this.config.appliance_id}/playback`,
-      event
-    );
+    await this.client.post('/appliances/playback', event);
   }
 }
 
