@@ -34,6 +34,24 @@ async function reportPlaybackEvent(event, mediaInfo = null) {
   }
 }
 
+/**
+ * Check if URL is a JW.org media URL
+ */
+function isJwOrgUrl(url) {
+  return /jw\.org.*#[a-z]{2,3}\/mediaitems\//i.test(url) ||
+         /jw\.org.*_VIDEO/i.test(url);
+}
+
+/**
+ * Build local player URL for JW.org videos
+ */
+function buildPlayerUrl(originalUrl, autoplay) {
+  const playerUrl = new URL('http://localhost:3000/player.html');
+  playerUrl.searchParams.set('url', originalUrl);
+  playerUrl.searchParams.set('autoplay', autoplay ? 'true' : 'false');
+  return playerUrl.toString();
+}
+
 async function playMedia(command, browserController) {
   const { url, media_type, autoplay = true, start_position = 0 } = command.payload;
 
@@ -52,7 +70,14 @@ async function playMedia(command, browserController) {
     logger.info('Audio-only playback: keeping standby screen visible');
   }
 
-  await browserController.navigateTo(url);
+  // Use local player for JW.org URLs to avoid cookies and get direct video
+  let targetUrl = url;
+  if (isJwOrgUrl(url)) {
+    targetUrl = buildPlayerUrl(url, autoplay);
+    logger.info('Using local player for JW.org video', { originalUrl: url, playerUrl: targetUrl });
+  }
+
+  await browserController.navigateTo(targetUrl);
 
   stateManager.setPlaying({
     url,

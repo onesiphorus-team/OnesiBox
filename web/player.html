@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OnesiBox Player</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+    .player-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .loading {
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 24px;
+      text-align: center;
+    }
+    .error {
+      color: #ff6b6b;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 20px;
+      text-align: center;
+      padding: 20px;
+    }
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid #333;
+      border-top: 4px solid #fff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="player-container" id="container">
+    <div class="loading">
+      <div class="spinner"></div>
+      <div>Caricamento video...</div>
+    </div>
+  </div>
+
+  <script>
+    // Language code mapping: URL codes -> JW API codes
+    const LANG_MAP = {
+      'it': 'I', 'en': 'E', 'es': 'S', 'pt': 'T', 'fr': 'F',
+      'de': 'X', 'ru': 'U', 'ja': 'J', 'ko': 'KO', 'zh': 'CHS',
+      'pl': 'P', 'nl': 'O', 'sv': 'Z', 'fi': 'FI', 'da': 'D',
+      'no': 'N', 'cs': 'B', 'sk': 'V', 'hu': 'H', 'ro': 'M',
+      'el': 'G', 'tr': 'TK', 'ar': 'A', 'he': 'HE', 'uk': 'K'
+    };
+
+    /**
+     * Parse JW.org URL to extract language and media ID
+     */
+    function parseJwUrl(url) {
+      // Pattern: ...#LANG/mediaitems/CATEGORY/MEDIA_ID
+      const hashMatch = url.match(/#([a-z]{2,3})\/mediaitems\/[^\/]+\/([^\/?]+)/i);
+      if (hashMatch) {
+        return { lang: hashMatch[1].toLowerCase(), mediaId: hashMatch[2] };
+      }
+
+      // Alternative path format
+      const pathMatch = url.match(/\/([a-z]{2,3})\/.*\/([a-zA-Z0-9_-]+_VIDEO)/i);
+      if (pathMatch) {
+        return { lang: pathMatch[1].toLowerCase(), mediaId: pathMatch[2] };
+      }
+
+      return null;
+    }
+
+    /**
+     * Fetch media data from JW CDN API
+     */
+    async function fetchMediaData(lang, mediaId) {
+      const apiLang = LANG_MAP[lang] || lang.toUpperCase();
+      const apiUrl = `https://b.jw-cdn.org/apis/mediator/v1/media-items/${apiLang}/${mediaId}`;
+
+      console.log('Fetching media from:', apiUrl);
+
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        throw new Error(`Media not found (${response.status})`);
+      }
+
+      const data = await response.json();
+      if (!data.media || data.media.length === 0) {
+        throw new Error('No media found for this ID');
+      }
+      return data.media[0];
+    }
+
+    /**
+     * Get best quality video URL
+     */
+    function getBestVideoUrl(media) {
+      const videos = media.files.filter(f => f.progressiveDownloadURL);
+      if (videos.length === 0) {
+        throw new Error('No video files available');
+      }
+
+      // Sort by quality (label contains resolution)
+      videos.sort((a, b) => {
+        const resA = parseInt(a.label) || 0;
+        const resB = parseInt(b.label) || 0;
+        return resB - resA;
+      });
+
+      return videos[0].progressiveDownloadURL;
+    }
+
+    /**
+     * Display video player
+     */
+    function displayVideo(videoUrl, title) {
+      const container = document.getElementById('container');
+
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.controls = false; // Kiosk mode - no controls
+      video.playsInline = true;
+      video.src = videoUrl;
+
+      // Fullscreen on click
+      video.addEventListener('click', () => {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          video.requestFullscreen();
+        }
+      });
+
+      // Auto-fullscreen on play
+      video.addEventListener('play', () => {
+        if (!document.fullscreenElement) {
+          video.requestFullscreen().catch(() => {});
+        }
+      });
+
+      // Notify parent when video ends
+      video.addEventListener('ended', () => {
+        console.log('Video ended');
+        // Navigate back to standby
+        window.location.href = '/';
+      });
+
+      video.addEventListener('error', (e) => {
+        console.error('Video playback error:', e);
+        showError('Errore durante la riproduzione del video');
+      });
+
+      container.innerHTML = '';
+      container.appendChild(video);
+
+      // Request fullscreen
+      video.requestFullscreen().catch(() => {
+        console.log('Could not enter fullscreen');
+      });
+    }
+
+    /**
+     * Show error message
+     */
+    function showError(message) {
+      const container = document.getElementById('container');
+      container.innerHTML = `<div class="error">${message}</div>`;
+
+      // Return to standby after 5 seconds
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 5000);
+    }
+
+    /**
+     * Main initialization
+     */
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const url = params.get('url');
+      const autoplay = params.get('autoplay') !== 'false';
+
+      if (!url) {
+        showError('Nessun URL specificato');
+        return;
+      }
+
+      console.log('Loading video from:', url);
+
+      // Check if it's a JW.org URL
+      const parsed = parseJwUrl(url);
+      if (!parsed) {
+        // Not a JW URL, try direct playback
+        if (url.match(/\.(mp4|webm|m3u8)(\?|$)/i)) {
+          displayVideo(url, 'Video');
+        } else {
+          showError('URL non supportato');
+        }
+        return;
+      }
+
+      try {
+        const mediaData = await fetchMediaData(parsed.lang, parsed.mediaId);
+        const videoUrl = getBestVideoUrl(mediaData);
+        displayVideo(videoUrl, mediaData.title);
+      } catch (error) {
+        console.error('Error loading video:', error);
+        showError(`Errore: ${error.message}`);
+      }
+    }
+
+    // Start when DOM is ready
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

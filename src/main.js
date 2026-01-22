@@ -29,7 +29,9 @@ let pollingInterval;
 let heartbeatInterval;
 
 function serveStatic(req, res) {
-  let filePath = req.url === '/' ? '/index.html' : req.url;
+  // Extract pathname without query string
+  const urlPath = new URL(req.url, 'http://localhost').pathname;
+  let filePath = urlPath === '/' ? '/index.html' : urlPath;
   const fullPath = path.join(WEB_DIR, filePath);
 
   if (!fullPath.startsWith(WEB_DIR)) {
@@ -76,6 +78,7 @@ async function startPolling() {
   const poll = async () => {
     try {
       const commands = await apiClient.getCommands();
+      logger.debug('Poll response', { commandCount: commands.length });
       if (commands.length > 0) {
         logger.info('Received commands', { count: commands.length });
         await commandManager.processCommands(commands);

@@ -6,6 +6,14 @@ const { isUrlAllowed, isZoomUrl } = require('../commands/validator');
 const execFileAsync = promisify(execFile);
 
 const STANDBY_URL = 'http://localhost:3000';
+const LOCAL_URL_PREFIX = 'http://localhost:3000/';
+
+/**
+ * Check if URL is a local application URL (localhost:3000)
+ */
+function isLocalUrl(url) {
+  return url === STANDBY_URL || url.startsWith(LOCAL_URL_PREFIX);
+}
 
 /**
  * Controls the Chromium browser for media playback and navigation.
@@ -22,19 +30,20 @@ class BrowserController {
 
   /**
    * Navigate the browser to a URL.
-   * URL must be in the whitelist or be the standby URL.
+   * URL must be in the whitelist, a local URL, or Zoom URL.
    *
    * @param {string} url - The URL to navigate to
    * @throws {Error} If URL is not allowed or navigation fails
    */
   async navigateTo(url) {
-    if (!isUrlAllowed(url) && !isZoomUrl(url) && url !== STANDBY_URL) {
+    if (!isUrlAllowed(url) && !isZoomUrl(url) && !isLocalUrl(url)) {
       throw new Error(`URL not allowed: ${url}`);
     }
 
     // Additional sanitization: ensure URL doesn't contain shell metacharacters
     // even though we use execFile, this provides defense in depth
-    if (this._containsShellMetacharacters(url)) {
+    // Skip check for local URLs (they are trusted and may contain & for query params)
+    if (!isLocalUrl(url) && this._containsShellMetacharacters(url)) {
       throw new Error('URL contains invalid characters');
     }
 
