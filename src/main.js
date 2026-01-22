@@ -117,7 +117,7 @@ async function startHeartbeat() {
         status: state.status,
         current_media: state.currentMedia ? {
           url: state.currentMedia.url,
-          media_type: state.currentMedia.media_type,
+          type: state.currentMedia.media_type, // Server expects 'type' not 'media_type'
           position: state.currentMedia.position,
           duration: state.currentMedia.duration
         } : null,
