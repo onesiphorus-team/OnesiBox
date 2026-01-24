@@ -40,6 +40,12 @@ function validateConfig(config) {
     }
   }
 
+  if (config.update_check_interval_seconds !== undefined) {
+    if (typeof config.update_check_interval_seconds !== 'number' || config.update_check_interval_seconds < 60) {
+      errors.push('update_check_interval_seconds must be >= 60');
+    }
+  }
+
   return errors;
 }
 
@@ -68,14 +74,16 @@ function loadConfig() {
     appliance_token: config.appliance_token,
     polling_interval_seconds: config.polling_interval_seconds ?? 5,
     heartbeat_interval_seconds: config.heartbeat_interval_seconds ?? 30,
-    default_volume: config.default_volume ?? 80
+    default_volume: config.default_volume ?? 80,
+    update_check_interval_seconds: config.update_check_interval_seconds ?? 1800 // 30 minutes
   };
 
   logger.info('Configuration loaded successfully', {
     server_url: finalConfig.server_url,
     appliance_id: finalConfig.appliance_id,
     polling_interval_seconds: finalConfig.polling_interval_seconds,
-    heartbeat_interval_seconds: finalConfig.heartbeat_interval_seconds
+    heartbeat_interval_seconds: finalConfig.heartbeat_interval_seconds,
+    update_check_interval_seconds: finalConfig.update_check_interval_seconds
   });
 
   return finalConfig;
