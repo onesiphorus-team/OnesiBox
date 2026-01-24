@@ -8,6 +8,7 @@ const { stateManager, CONNECTION_STATUS } = require('./state/state-manager');
 const ApiClient = require('./communication/api-client');
 const BrowserController = require('./browser/controller');
 const CommandManager = require('./commands/manager');
+const AutoUpdater = require('./update/auto-updater');
 
 const WEB_DIR = path.join(__dirname, '../web');
 const PORT = process.env.PORT || 3000;
@@ -28,6 +29,7 @@ let browserController;
 let commandManager;
 let pollingInterval;
 let heartbeatInterval;
+let autoUpdater;
 
 function serveStatic(req, res) {
   // Extract pathname without query string
@@ -176,6 +178,7 @@ async function shutdown(signal) {
 
   if (pollingInterval) clearInterval(pollingInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
+  if (autoUpdater) autoUpdater.stop();
 
   try {
     await browserController.goToStandby();
@@ -222,6 +225,12 @@ async function main() {
 
   stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
   logger.info('OnesiBox ready');
+
+  // Start auto-updater (checks every 30 minutes by default)
+  autoUpdater = new AutoUpdater({
+    checkIntervalSeconds: config.update_check_interval_seconds || 30 * 60
+  });
+  autoUpdater.start();
 
   // Notify systemd we're ready and start watchdog pings
   watchdog.ready();
