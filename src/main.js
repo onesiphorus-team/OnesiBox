@@ -238,6 +238,8 @@ function registerHandlers() {
   const zoomHandler = require('./commands/handlers/zoom');
   const volumeHandler = require('./commands/handlers/volume');
   const systemHandler = require('./commands/handlers/system');
+  const systemInfoHandler = require('./commands/handlers/system-info');
+  const logsHandler = require('./commands/handlers/logs');
 
   mediaHandler.setApiClient(apiClient);
 
@@ -257,6 +259,10 @@ function registerHandlers() {
   // System handlers
   commandManager.registerHandler('reboot', systemHandler.reboot);
   commandManager.registerHandler('shutdown', systemHandler.shutdown);
+
+  // Diagnostic handlers
+  commandManager.registerHandler('get_system_info', systemInfoHandler.getSystemInfo);
+  commandManager.registerHandler('get_logs', logsHandler.getLogs);
 }
 
 async function shutdown(signal) {

@@ -12,7 +12,8 @@ const ERROR_CODES = {
   VOLUME_HANDLER_FAILED: 'E008',
   COMMAND_EXPIRED: 'E009',
   INVALID_PAYLOAD: 'E010',
-  SYSTEM_HANDLER_FAILED: 'E011'
+  SYSTEM_HANDLER_FAILED: 'E011',
+  DIAGNOSTICS_HANDLER_FAILED: 'E012'
 };
 
 /**
@@ -50,7 +51,9 @@ const COMMAND_TYPES = [
   'join_zoom',
   'leave_zoom',
   'reboot',
-  'shutdown'
+  'shutdown',
+  'get_system_info',
+  'get_logs'
 ];
 
 /**
@@ -257,6 +260,22 @@ function validateCommand(command) {
         }
       }
       break;
+
+    case 'get_logs':
+      // Optional lines parameter validation
+      if (command.payload?.lines !== undefined) {
+        if (typeof command.payload.lines !== 'number' ||
+            !Number.isInteger(command.payload.lines) ||
+            command.payload.lines < 1 ||
+            command.payload.lines > 500) {
+          errors.push('get_logs lines must be 1-500');
+        }
+      }
+      break;
+
+    case 'get_system_info':
+      // No payload required
+      break;
   }
 
   if (errors.length > 0) {
@@ -309,6 +328,9 @@ function getErrorCodeForCommandType(commandType) {
     case 'reboot':
     case 'shutdown':
       return ERROR_CODES.SYSTEM_HANDLER_FAILED;
+    case 'get_system_info':
+    case 'get_logs':
+      return ERROR_CODES.DIAGNOSTICS_HANDLER_FAILED;
     default:
       return ERROR_CODES.INVALID_COMMAND_STRUCTURE;
   }
