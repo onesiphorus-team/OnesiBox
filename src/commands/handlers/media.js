@@ -1,6 +1,7 @@
 const logger = require('../../logging/logger');
 const { stateManager, STATUS } = require('../../state/state-manager');
 const { isUrlAllowed } = require('../validator');
+const { leaveZoom, isZoomActive } = require('./zoom');
 
 let apiClient = null;
 
@@ -94,6 +95,13 @@ async function playMedia(command, browserController) {
 
 async function stopMedia(command, browserController) {
   const currentState = stateManager.getState();
+
+  // Handle Zoom call interruption
+  if (currentState.status === STATUS.CALLING || isZoomActive()) {
+    logger.info('Stopping Zoom meeting via stop_media command');
+    await leaveZoom(command, browserController);
+    return;
+  }
 
   if (currentState.status !== STATUS.PLAYING) {
     logger.info('Not playing, nothing to stop');
