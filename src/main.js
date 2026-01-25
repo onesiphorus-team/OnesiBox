@@ -192,14 +192,95 @@ async function startPolling() {
   pollingInterval = setInterval(poll, config.polling_interval_seconds * 1000);
 }
 
+/**
+ * Get network information for heartbeat.
+ * Identifies connection type, interface details, and WiFi info if applicable.
+ */
+async function getNetworkInfo() {
+  try {
+    const [networkInterfaces, wifiConnections, defaultGateway] = await Promise.all([
+      si.networkInterfaces(),
+      si.wifiConnections(),
+      si.networkGatewayDefault()
+    ]);
+
+    // Find the active interface (prefer non-internal, has IP, is up)
+    const activeInterface = networkInterfaces.find(iface =>
+      iface.operstate === 'up' && !iface.internal && iface.ip4 &&
+      !iface.iface.startsWith('docker') && !iface.iface.startsWith('br-') &&
+      !iface.iface.startsWith('veth')
+    );
+
+    if (!activeInterface) {
+      return { network: null, wifi: null };
+    }
+
+    // Determine network type based on interface name
+    const isWifi = activeInterface.iface.startsWith('wlan') ||
+                   activeInterface.iface.startsWith('wl') ||
+                   activeInterface.type === 'wireless';
+
+    const network = {
+      type: isWifi ? 'wifi' : 'ethernet',
+      interface: activeInterface.iface,
+      ip: activeInterface.ip4,
+      netmask: activeInterface.ip4subnet || null,
+      gateway: defaultGateway || null,
+      mac: activeInterface.mac || null,
+      dns: activeInterface.dnsSuffix ? [activeInterface.dnsSuffix] : []
+    };
+
+    // Add WiFi-specific info if applicable
+    let wifi = null;
+    if (isWifi && wifiConnections && wifiConnections.length > 0) {
+      const wifiConn = wifiConnections[0];
+      // Convert dBm to percentage (typical range: -100 dBm to -30 dBm)
+      const signalDbm = wifiConn.signalLevel || -100;
+      const signalPercent = Math.min(100, Math.max(0, 2 * (signalDbm + 100)));
+
+      wifi = {
+        ssid: wifiConn.ssid || null,
+        signal_dbm: signalDbm,
+        signal_percent: Math.round(signalPercent),
+        channel: wifiConn.channel || null,
+        frequency: wifiConn.frequency || null,
+        security: wifiConn.security || null
+      };
+    }
+
+    return { network, wifi };
+  } catch (error) {
+    logger.debug('Failed to get network info', { error: error.message });
+    return { network: null, wifi: null };
+  }
+}
+
+/**
+ * Get detailed memory information for heartbeat.
+ * Returns breakdown similar to `free -h` command.
+ */
+async function getDetailedMemory(mem) {
+  return {
+    total: mem.total,
+    used: mem.used,
+    free: mem.free,
+    available: mem.available,
+    buffers: mem.buffers,
+    cached: mem.cached,
+    percent: Math.round((mem.used / mem.total) * 100)
+  };
+}
+
 async function startHeartbeat() {
   const sendHeartbeat = async () => {
     try {
-      const [cpu, mem, disk, temp] = await Promise.all([
+      const [cpu, mem, disk, temp, version, networkData] = await Promise.all([
         si.currentLoad(),
         si.mem(),
         si.fsSize(),
-        si.cpuTemperature()
+        si.cpuTemperature(),
+        getAppVersion(),
+        getNetworkInfo()
       ]);
 
       const state = stateManager.getState();
@@ -218,7 +299,12 @@ async function startHeartbeat() {
         disk_usage: disk[0] ? Math.round(disk[0].use) : 0,
         temperature: temp.main || 0,
         uptime,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        // Extended diagnostics data
+        app_version: version,
+        network: networkData.network,
+        wifi: networkData.wifi,
+        memory: await getDetailedMemory(mem)
       };
 
       await apiClient.sendHeartbeat(heartbeat);
@@ -238,6 +324,7 @@ function registerHandlers() {
   const zoomHandler = require('./commands/handlers/zoom');
   const volumeHandler = require('./commands/handlers/volume');
   const systemHandler = require('./commands/handlers/system');
+  const serviceHandler = require('./commands/handlers/service');
   const systemInfoHandler = require('./commands/handlers/system-info');
   const logsHandler = require('./commands/handlers/logs');
 
@@ -259,6 +346,7 @@ function registerHandlers() {
   // System handlers
   commandManager.registerHandler('reboot', systemHandler.reboot);
   commandManager.registerHandler('shutdown', systemHandler.shutdown);
+  commandManager.registerHandler('restart_service', serviceHandler.restartService);
 
   // Diagnostic handlers
   commandManager.registerHandler('get_system_info', systemInfoHandler.getSystemInfo);
