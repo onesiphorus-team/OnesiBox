@@ -7,12 +7,25 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <!-- Animated background particles -->
+  <div class="particles" id="particles"></div>
+
   <div class="container">
     <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 100 100" class="logo-svg">
+          <circle cx="50" cy="50" r="45" class="logo-circle"/>
+          <path d="M30 50 L45 65 L70 35" class="logo-check"/>
+        </svg>
+      </div>
       <h1>OnesiBox</h1>
+      <p class="tagline">Il tuo assistente digitale</p>
     </div>
 
-    <div class="clock" id="clock">--:--</div>
+    <div class="clock-container">
+      <div class="clock" id="clock">--:--</div>
+      <div class="clock-separator"></div>
+    </div>
 
     <div class="date" id="date">--</div>
 
@@ -21,6 +34,15 @@
       <span class="status-text" id="statusText">Connessione in corso...</span>
     </div>
   </div>
+
+  <!-- Footer con informazioni sistema -->
+  <footer class="system-info">
+    <span id="versionInfo">OnesiBox v--</span>
+    <span class="separator">•</span>
+    <span id="ipInfo">IP: --</span>
+    <span class="separator">•</span>
+    <span id="wifiInfo">WiFi: --</span>
+  </footer>
 
   <script src="app.js"></script>
 </body>

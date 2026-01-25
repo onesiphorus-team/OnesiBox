@@ -1,6 +1,9 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const si = require('systeminformation');
 const logger = require('./logging/logger');
 const watchdog = require('./watchdog');
 const { loadConfig } = require('./config/config');
@@ -9,6 +12,11 @@ const ApiClient = require('./communication/api-client');
 const BrowserController = require('./browser/controller');
 const CommandManager = require('./commands/manager');
 const AutoUpdater = require('./update/auto-updater');
+
+const execFileAsync = promisify(execFile);
+
+// Version will be loaded from git tag (cached after first fetch)
+let cachedVersion = null;
 
 const WEB_DIR = path.join(__dirname, '../web');
 const PORT = process.env.PORT || 3000;
@@ -57,6 +65,45 @@ function serveStatic(req, res) {
   });
 }
 
+/**
+ * Get application version from git tag.
+ * Uses `git describe --tags` to get the current tag.
+ * Falls back to package.json version if git is not available.
+ */
+async function getAppVersion() {
+  // Return cached version if available
+  if (cachedVersion) {
+    return cachedVersion;
+  }
+
+  try {
+    // Try to get version from git tag
+    const { stdout } = await execFileAsync('git', ['describe', '--tags', '--abbrev=0'], {
+      cwd: path.join(__dirname, '..')
+    });
+    const gitTag = stdout.trim();
+
+    if (gitTag) {
+      // Remove 'v' prefix if present for consistency
+      cachedVersion = gitTag.startsWith('v') ? gitTag.substring(1) : gitTag;
+      logger.debug('Version from git tag', { version: cachedVersion });
+      return cachedVersion;
+    }
+  } catch (error) {
+    logger.debug('Could not get version from git tag', { error: error.message });
+  }
+
+  // Fallback to package.json
+  try {
+    const packageJson = require('../package.json');
+    cachedVersion = packageJson.version;
+    logger.debug('Version from package.json', { version: cachedVersion });
+    return cachedVersion;
+  } catch {
+    return 'unknown';
+  }
+}
+
 function handleApiStatus(req, res) {
   const state = stateManager.getState();
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -67,10 +114,54 @@ function handleApiStatus(req, res) {
   }));
 }
 
+async function handleApiSystemInfo(req, res) {
+  try {
+    // Get version, network interfaces and WiFi info in parallel
+    const [version, networkInterfaces, wifiConnections] = await Promise.all([
+      getAppVersion(),
+      si.networkInterfaces(),
+      si.wifiConnections()
+    ]);
+
+    // Find primary IP (prefer non-internal, non-docker interfaces)
+    let primaryIp = '--';
+    for (const iface of networkInterfaces) {
+      if (!iface.internal && iface.ip4 && !iface.iface.startsWith('docker') && !iface.iface.startsWith('br-')) {
+        primaryIp = iface.ip4;
+        break;
+      }
+    }
+
+    // Get WiFi SSID (first connected network)
+    let wifiSsid = null;
+    if (wifiConnections && wifiConnections.length > 0) {
+      wifiSsid = wifiConnections[0].ssid || null;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      version,
+      ip: primaryIp,
+      wifi: wifiSsid
+    }));
+  } catch (error) {
+    logger.warn('Failed to get system info', { error: error.message });
+    const version = await getAppVersion();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      version,
+      ip: '--',
+      wifi: null
+    }));
+  }
+}
+
 function createServer() {
   return http.createServer((req, res) => {
     if (req.url === '/api/status') {
       handleApiStatus(req, res);
+    } else if (req.url === '/api/system-info') {
+      handleApiSystemInfo(req, res);
     } else {
       serveStatic(req, res);
     }
@@ -102,8 +193,6 @@ async function startPolling() {
 }
 
 async function startHeartbeat() {
-  const si = require('systeminformation');
-
   const sendHeartbeat = async () => {
     try {
       const [cpu, mem, disk, temp] = await Promise.all([
@@ -180,6 +269,14 @@ async function shutdown(signal) {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (autoUpdater) autoUpdater.stop();
 
+  // Cleanup Zoom resources first (if any)
+  try {
+    const zoomHandler = require('./commands/handlers/zoom');
+    await zoomHandler.cleanup();
+  } catch {
+    // Ignore Zoom cleanup errors during shutdown
+  }
+
   try {
     await browserController.goToStandby();
   } catch {
@@ -213,11 +310,12 @@ async function main() {
   });
 
   // Launch browser with standby screen on startup
+  // Use initialize() which does a force restart to ensure clean state
   try {
-    logger.info('Launching browser with standby screen...');
-    await browserController.goToStandby();
+    logger.info('Initializing browser...');
+    await browserController.initialize();
   } catch (error) {
-    logger.warn('Could not launch browser at startup', { error: error.message });
+    logger.warn('Could not initialize browser at startup', { error: error.message });
   }
 
   await startPolling();
