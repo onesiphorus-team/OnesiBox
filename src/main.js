@@ -324,9 +324,9 @@ async function main() {
   stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
   logger.info('OnesiBox ready');
 
-  // Start auto-updater (checks every 30 minutes by default)
+  // Start auto-updater (checks every 5 minutes by default)
   autoUpdater = new AutoUpdater({
-    checkIntervalSeconds: config.update_check_interval_seconds || 30 * 60
+    checkIntervalSeconds: config.update_check_interval_seconds || 5 * 60
   });
   autoUpdater.start();
 
