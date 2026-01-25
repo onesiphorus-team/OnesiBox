@@ -16,7 +16,10 @@ const COMMAND_PRIORITY = {
   pause_media: 2,
   resume_media: 2,
   // Settings - low priority
-  set_volume: 3
+  set_volume: 3,
+  // Diagnostics - lowest priority (can wait)
+  get_system_info: 4,
+  get_logs: 4
 };
 
 class CommandManager extends EventEmitter {
@@ -73,10 +76,11 @@ class CommandManager extends EventEmitter {
         priority
       });
 
-      await handler(command, this.browserController);
+      // Handler may return result data (for diagnostic commands like get_system_info, get_logs)
+      const result = await handler(command, this.browserController);
 
-      await this._sendAck(command.id, { status: 'success' });
-      this.emit('commandExecuted', { command, status: 'success' });
+      await this._sendAck(command.id, { status: 'success', result: result || null });
+      this.emit('commandExecuted', { command, status: 'success', result });
     } catch (error) {
       logger.error('Command execution failed', {
         id: command.id,

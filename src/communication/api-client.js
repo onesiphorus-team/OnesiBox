@@ -63,12 +63,14 @@ class ApiClient {
   /**
    * Acknowledge command execution.
    * Uses command UUID as the identifier.
+   * For diagnostic commands (get_system_info, get_logs), result contains the payload.
    */
   async acknowledgeCommand(commandUuid, ack) {
     await this.client.post(`/commands/${commandUuid}/ack`, {
       status: ack.status,
       error_code: ack.error_code || null,
       error_message: ack.error_message || null,
+      result: ack.result || null,
       executed_at: new Date().toISOString()
     });
   }
