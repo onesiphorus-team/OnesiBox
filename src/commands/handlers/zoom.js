@@ -253,10 +253,13 @@ async function joinZoom(command, browserController) {
 /**
  * Leave the current Zoom meeting.
  *
+ * This closes the Playwright browser context but does NOT restart the main browser,
+ * since the main browser should already be showing the standby screen underneath.
+ *
  * @param {object} command - The command object
- * @param {object} browserController - The browser controller
+ * @param {object} browserController - The browser controller (unused but kept for interface consistency)
  */
-async function leaveZoom(command, browserController) {
+async function leaveZoom(_command, _browserController) {
   const currentState = stateManager.getState();
 
   if (currentState.status !== STATUS.CALLING) {
@@ -308,21 +311,39 @@ async function leaveZoom(command, browserController) {
     logger.warn('Error clicking leave button', { error: error.message });
   }
 
-  // Close browser context
+  // Close Playwright browser context
+  // This closes only the Zoom browser, not the main kiosk browser
   await closeBrowserContext();
 
-  // Navigate back to standby screen using main browser controller
-  await browserController.goToStandby();
-
-  // Update state
+  // Update state - the main browser should already be showing standby
+  // No need to call browserController.goToStandby() which would restart the browser
   stateManager.leaveMeeting();
 
   logger.info('Zoom meeting left');
+}
+
+/**
+ * Cleanup Zoom resources.
+ * Should be called during application shutdown to ensure proper cleanup.
+ */
+async function cleanup() {
+  logger.info('Cleaning up Zoom resources');
+  await closeBrowserContext();
+}
+
+/**
+ * Check if a Zoom meeting is currently active.
+ * @returns {boolean} True if Zoom browser context is open
+ */
+function isZoomActive() {
+  return browserContext !== null;
 }
 
 module.exports = {
   joinZoom,
   leaveZoom,
   parseZoomUrl,
-  convertToWebClientUrl
+  convertToWebClientUrl,
+  cleanup,
+  isZoomActive
 };

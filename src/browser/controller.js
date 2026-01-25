@@ -25,7 +25,8 @@ function isLocalUrl(url) {
 class BrowserController {
   constructor() {
     this.currentUrl = STANDBY_URL;
-    this.browserProcess = null;
+    this.browserPid = null; // Track the PID of our browser process
+    this.isInitialized = false;
   }
 
   /**
@@ -49,18 +50,34 @@ class BrowserController {
 
     logger.info('Navigating to URL', { url });
 
+    // Try xdotool navigation first (preferred method - doesn't launch new browser)
+    let xdotoolSuccess = false;
     try {
-      // Use xdotool to control existing Chromium window
-      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'F5']);
-      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'type', '--clearmodifiers', url]);
-      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', 'Return']);
-    } catch {
-      // Fallback: launch new browser instance
-      try {
-        await this._launchBrowser(url);
-      } catch (error) {
-        logger.error('Failed to navigate browser', { url, error: error.message });
-        throw error;
+      // Use Ctrl+L to focus address bar (more reliable than F5+type)
+      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'ctrl+l']);
+      await this._delay(100);
+      await this._xdotoolCommand(['type', '--clearmodifiers', url]);
+      await this._xdotoolCommand(['key', 'Return']);
+      xdotoolSuccess = true;
+    } catch (xdotoolError) {
+      logger.debug('xdotool navigation failed', { error: xdotoolError.message });
+    }
+
+    // Fallback: launch new browser ONLY if we don't have one running
+    if (!xdotoolSuccess) {
+      if (this.browserPid) {
+        // We have a browser but xdotool failed - try restarting our own
+        logger.warn('xdotool failed but browser exists, restarting own browser');
+        await this._restartOwnBrowser(url);
+      } else {
+        // No browser at all - launch one
+        logger.info('No browser running, launching new instance');
+        try {
+          await this._launchBrowser(url);
+        } catch (error) {
+          logger.error('Failed to launch browser', { url, error: error.message });
+          throw error;
+        }
       }
     }
 
@@ -69,20 +86,122 @@ class BrowserController {
 
   /**
    * Navigate back to the standby screen.
-   * Kills existing Chromium and relaunches to ensure clean state.
+   * Stops any playing media first using JavaScript, then navigates.
+   * Does NOT restart the browser to avoid disrupting other browser contexts (e.g., Zoom Playwright).
    */
   async goToStandby() {
-    await this.restartBrowser(STANDBY_URL);
+    logger.info('Going to standby');
+
+    try {
+      // First, stop any media playback via JavaScript to ensure clean stop
+      await this._stopAllMedia();
+
+      // Small delay to ensure media is stopped
+      await this._delay(100);
+
+      // Navigate to standby using the standard navigation
+      await this._navigateToUrl(STANDBY_URL);
+      this.currentUrl = STANDBY_URL;
+
+      logger.info('Navigated to standby successfully');
+    } catch (error) {
+      logger.warn('Failed to navigate to standby cleanly, attempting browser restart', { error: error.message });
+      // Only restart as last resort
+      await this._restartOwnBrowser(STANDBY_URL);
+    }
   }
 
   /**
-   * Kill all Chromium processes and relaunch with a URL.
-   * Ensures clean state with no background playback.
+   * Stop all media playback in the browser using JavaScript.
+   * This ensures video/audio stops without needing to kill the browser.
+   */
+  async _stopAllMedia() {
+    try {
+      // Stop all video and audio elements
+      const stopScript = `
+        document.querySelectorAll('video, audio').forEach(el => {
+          el.pause();
+          el.currentTime = 0;
+          el.src = '';
+          el.load();
+        });
+      `.replace(/\n/g, ' ').trim();
+
+      // Try via xdotool console execution
+      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'F12']);
+      await this._delay(300);
+      await this._xdotoolCommand(['type', '--clearmodifiers', stopScript]);
+      await this._xdotoolCommand(['key', 'Return']);
+      await this._delay(200);
+      await this._xdotoolCommand(['key', 'F12']);
+
+      logger.debug('Media stop script executed');
+    } catch (error) {
+      // Not critical - navigation will handle it
+      logger.debug('Could not execute media stop script', { error: error.message });
+    }
+  }
+
+  /**
+   * Navigate to a URL using xdotool. Does not launch new browser.
+   * @param {string} url - URL to navigate to
+   * @private
+   */
+  async _navigateToUrl(url) {
+    // Try to use xdotool to navigate in existing window
+    await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'ctrl+l']);
+    await this._delay(100);
+    await this._xdotoolCommand(['type', '--clearmodifiers', url]);
+    await this._xdotoolCommand(['key', 'Return']);
+  }
+
+  /**
+   * Restart only our own browser process (if we track it) or launch a new one.
+   * This is a fallback for when navigation fails.
+   * Does NOT use pkill to avoid killing Playwright browsers.
+   *
+   * @param {string} url - The URL to open
+   * @private
+   */
+  async _restartOwnBrowser(url = STANDBY_URL) {
+    logger.info('Restarting own browser process', { url });
+
+    try {
+      // Kill only our tracked browser process if we have one
+      if (this.browserPid) {
+        try {
+          await execFileAsync('kill', ['-9', String(this.browserPid)]);
+          logger.info('Killed own browser process', { pid: this.browserPid });
+        } catch {
+          // Process might already be dead
+          logger.debug('Browser process already terminated');
+        }
+        this.browserPid = null;
+      }
+
+      // Wait for process to terminate
+      await this._delay(300);
+
+      // Launch fresh browser
+      await this._launchBrowser(url);
+      this.currentUrl = url;
+
+      logger.info('Browser restarted successfully');
+    } catch (error) {
+      logger.error('Failed to restart browser', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Force kill all Chromium processes and relaunch.
+   * Use sparingly - this will kill Playwright browsers too!
+   * Should only be used for initialization or critical recovery.
    *
    * @param {string} url - The URL to open after restart
    */
-  async restartBrowser(url = STANDBY_URL) {
-    logger.info('Restarting browser', { url });
+  async forceRestartBrowser(url = STANDBY_URL) {
+    logger.info('Force restarting all browsers', { url });
 
     try {
       // Kill all chromium processes
@@ -97,11 +216,26 @@ class BrowserController {
       await this._launchBrowser(url);
       this.currentUrl = url;
 
-      logger.info('Browser restarted successfully');
+      logger.info('Browser force restarted successfully');
     } catch (error) {
-      logger.error('Failed to restart browser', { error: error.message });
+      logger.error('Failed to force restart browser', { error: error.message });
       throw error;
     }
+  }
+
+  /**
+   * Initialize the browser on startup.
+   * This is the only place where force restart should be used.
+   */
+  async initialize() {
+    if (this.isInitialized) {
+      logger.debug('Browser already initialized');
+      return;
+    }
+
+    logger.info('Initializing browser controller');
+    await this.forceRestartBrowser(STANDBY_URL);
+    this.isInitialized = true;
   }
 
   /**
@@ -180,6 +314,7 @@ class BrowserController {
    * Launch Chromium browser with a URL safely.
    * Uses spawn to prevent shell injection.
    * Launches in kiosk mode for fullscreen without decorations.
+   * Tracks the PID for later selective termination.
    *
    * @param {string} url - The URL to open
    * @private
@@ -205,6 +340,10 @@ class BrowserController {
         stdio: 'ignore'
       });
 
+      // Track our browser PID for selective termination
+      this.browserPid = child.pid;
+      logger.info('Browser launched', { pid: this.browserPid, url });
+
       child.unref();
 
       // Consider launch successful immediately
@@ -212,6 +351,7 @@ class BrowserController {
       setTimeout(resolve, 1000);
 
       child.on('error', (error) => {
+        this.browserPid = null;
         reject(error);
       });
     });
