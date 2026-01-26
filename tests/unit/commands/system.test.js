@@ -21,7 +21,7 @@ jest.mock('../../../src/state/state-manager', () => ({
 }));
 
 jest.mock('child_process', () => ({
-  exec: jest.fn((cmd, callback) => {
+  execFile: jest.fn((cmd, args, callback) => {
     // Simulate successful command execution
     callback(null, 'success', '');
   })
@@ -56,9 +56,10 @@ describe('System Handler', () => {
       // Fast-forward the setTimeout
       jest.advanceTimersByTime(1000);
 
-      const { exec } = require('child_process');
-      expect(exec).toHaveBeenCalledWith(
-        'sudo reboot',
+      const { execFile } = require('child_process');
+      expect(execFile).toHaveBeenCalledWith(
+        'sudo',
+        ['reboot'],
         expect.any(Function)
       );
     });
@@ -72,9 +73,10 @@ describe('System Handler', () => {
 
       await reboot(command, mockBrowserController);
 
-      const { exec } = require('child_process');
-      expect(exec).toHaveBeenCalledWith(
-        'sudo shutdown -r +2',
+      const { execFile } = require('child_process');
+      expect(execFile).toHaveBeenCalledWith(
+        'sudo',
+        ['shutdown', '-r', '+2'],
         expect.any(Function)
       );
     });
@@ -109,9 +111,10 @@ describe('System Handler', () => {
       // Fast-forward the setTimeout
       jest.advanceTimersByTime(1000);
 
-      const { exec } = require('child_process');
-      expect(exec).toHaveBeenCalledWith(
-        'sudo shutdown -h now',
+      const { execFile } = require('child_process');
+      expect(execFile).toHaveBeenCalledWith(
+        'sudo',
+        ['shutdown', '-h', 'now'],
         expect.any(Function)
       );
     });
@@ -125,9 +128,10 @@ describe('System Handler', () => {
 
       await shutdown(command, mockBrowserController);
 
-      const { exec } = require('child_process');
-      expect(exec).toHaveBeenCalledWith(
-        'sudo shutdown -h +5',
+      const { execFile } = require('child_process');
+      expect(execFile).toHaveBeenCalledWith(
+        'sudo',
+        ['shutdown', '-h', '+5'],
         expect.any(Function)
       );
     });

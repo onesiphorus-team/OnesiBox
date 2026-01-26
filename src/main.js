@@ -21,6 +21,13 @@ let cachedVersion = null;
 const WEB_DIR = path.join(__dirname, '../web');
 const PORT = process.env.PORT || 3000;
 
+/**
+ * Optional API key for authenticating local API requests.
+ * If set, API endpoints require X-API-Key header.
+ * If not set, API endpoints are accessible without authentication.
+ */
+const LOCAL_API_KEY = process.env.ONESIBOX_LOCAL_API_KEY || null;
+
 const MIME_TYPES = {
   '.html': 'text/html',
   '.css': 'text/css',
@@ -30,6 +37,56 @@ const MIME_TYPES = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml'
 };
+
+/**
+ * Security headers to include in all HTTP responses.
+ * These headers help protect against common web vulnerabilities.
+ */
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'X-XSS-Protection': '1; mode=block',
+  'Referrer-Policy': 'no-referrer',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+};
+
+/**
+ * Write HTTP response with security headers.
+ * @param {http.ServerResponse} res - The response object
+ * @param {number} statusCode - HTTP status code
+ * @param {object} additionalHeaders - Additional headers to include
+ */
+function writeSecureResponse(res, statusCode, additionalHeaders = {}) {
+  res.writeHead(statusCode, { ...SECURITY_HEADERS, ...additionalHeaders });
+}
+
+/**
+ * Check if API request is authenticated.
+ * If LOCAL_API_KEY is not set, all requests are allowed.
+ * If set, requests must include matching X-API-Key header.
+ * @param {http.IncomingMessage} req - The request object
+ * @returns {boolean} True if authenticated
+ */
+function isApiAuthenticated(req) {
+  if (!LOCAL_API_KEY) {
+    return true; // No key configured, allow all
+  }
+
+  const providedKey = req.headers['x-api-key'];
+  return providedKey === LOCAL_API_KEY;
+}
+
+/**
+ * Send 401 Unauthorized response.
+ * @param {http.ServerResponse} res - The response object
+ */
+function sendUnauthorized(res) {
+  writeSecureResponse(res, 401, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    error: 'Unauthorized',
+    message: 'Valid X-API-Key header required'
+  }));
+}
 
 let config;
 let apiClient;
@@ -46,21 +103,21 @@ function serveStatic(req, res) {
   const fullPath = path.join(WEB_DIR, filePath);
 
   if (!fullPath.startsWith(WEB_DIR)) {
-    res.writeHead(403);
+    writeSecureResponse(res, 403, { 'Content-Type': 'text/plain' });
     res.end('Forbidden');
     return;
   }
 
   fs.readFile(fullPath, (err, data) => {
     if (err) {
-      res.writeHead(404);
+      writeSecureResponse(res, 404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
       return;
     }
 
     const ext = path.extname(fullPath);
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': contentType });
+    writeSecureResponse(res, 200, { 'Content-Type': contentType });
     res.end(data);
   });
 }
@@ -106,7 +163,7 @@ async function getAppVersion() {
 
 function handleApiStatus(req, res) {
   const state = stateManager.getState();
-  res.writeHead(200, { 'Content-Type': 'application/json' });
+  writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
     status: state.status,
     connectionStatus: state.connectionStatus,
@@ -138,7 +195,7 @@ async function handleApiSystemInfo(req, res) {
       wifiSsid = wifiConnections[0].ssid || null;
     }
 
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       version,
       ip: primaryIp,
@@ -147,7 +204,7 @@ async function handleApiSystemInfo(req, res) {
   } catch (error) {
     logger.warn('Failed to get system info', { error: error.message });
     const version = await getAppVersion();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       version,
       ip: '--',
@@ -158,11 +215,24 @@ async function handleApiSystemInfo(req, res) {
 
 function createServer() {
   return http.createServer((req, res) => {
-    if (req.url === '/api/status') {
-      handleApiStatus(req, res);
-    } else if (req.url === '/api/system-info') {
-      handleApiSystemInfo(req, res);
+    // API endpoints require authentication if LOCAL_API_KEY is set
+    if (req.url === '/api/status' || req.url === '/api/system-info') {
+      if (!isApiAuthenticated(req)) {
+        logger.warn('Unauthorized API request', {
+          url: req.url,
+          ip: req.socket.remoteAddress
+        });
+        sendUnauthorized(res);
+        return;
+      }
+
+      if (req.url === '/api/status') {
+        handleApiStatus(req, res);
+      } else {
+        handleApiSystemInfo(req, res);
+      }
     } else {
+      // Static files don't require authentication
       serveStatic(req, res);
     }
   });

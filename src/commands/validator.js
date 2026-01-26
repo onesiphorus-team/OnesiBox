@@ -2,19 +2,38 @@ const logger = require('../logging/logger');
 
 /**
  * Centralized error codes for consistent error reporting.
+ *
+ * Standard codes (E001-E010) are aligned with Onesiforo server spec:
+ * - E001: Token non valido (server-side only)
+ * - E002: Risorsa non trovata (server-side only)
+ * - E003: Non autorizzato / Appliance disattivata (server-side only)
+ * - E004: Comando scaduto
+ * - E005: URL media non valido
+ * - E006: Tipo comando non supportato
+ * - E007: Appliance offline (server-side only)
+ * - E008: Rate limit superato (server-side only)
+ * - E009: Errore interno
+ * - E010: Timeout esecuzione
+ *
+ * Client-specific codes (E1xx) for handler errors:
  */
 const ERROR_CODES = {
-  UNKNOWN_COMMAND_TYPE: 'E003',
-  INVALID_COMMAND_STRUCTURE: 'E004',
+  // Standard codes (aligned with server spec)
+  COMMAND_EXPIRED: 'E004',
   URL_NOT_WHITELISTED: 'E005',
-  MEDIA_HANDLER_FAILED: 'E006',
-  ZOOM_HANDLER_FAILED: 'E007',
-  VOLUME_HANDLER_FAILED: 'E008',
-  COMMAND_EXPIRED: 'E009',
-  INVALID_PAYLOAD: 'E010',
-  SYSTEM_HANDLER_FAILED: 'E011',
-  DIAGNOSTICS_HANDLER_FAILED: 'E012',
-  SERVICE_HANDLER_FAILED: 'E013'
+  UNKNOWN_COMMAND_TYPE: 'E006',
+  INTERNAL_ERROR: 'E009',
+  EXECUTION_TIMEOUT: 'E010',
+
+  // Client-specific handler errors (E1xx range)
+  MEDIA_HANDLER_FAILED: 'E101',
+  ZOOM_HANDLER_FAILED: 'E102',
+  VOLUME_HANDLER_FAILED: 'E103',
+  SYSTEM_HANDLER_FAILED: 'E104',
+  DIAGNOSTICS_HANDLER_FAILED: 'E105',
+  SERVICE_HANDLER_FAILED: 'E106',
+  INVALID_COMMAND_STRUCTURE: 'E107',
+  INVALID_PAYLOAD: 'E108'
 };
 
 /**

@@ -12,5 +12,14 @@ RestartSec=10
 Environment=NODE_ENV=production
 WorkingDirectory=/opt/onesibox
 
+# Sensitive configuration via environment variables (recommended for production)
+# Uncomment and set these instead of storing in config.json:
+# Environment=ONESIBOX_SERVER_URL=https://onesiforo.example.com
+# Environment=ONESIBOX_APPLIANCE_ID=your-appliance-uuid
+# Environment=ONESIBOX_TOKEN=your-secret-token
+#
+# Or load from a separate credentials file (more secure):
+# EnvironmentFile=/opt/onesibox/config/credentials.env
+
 [Install]
 WantedBy=graphical.target
