@@ -7,19 +7,54 @@ const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, '../../confi
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_REGEX = /^https:\/\/.+/;
 
+/**
+ * Environment variables that can override config file values.
+ * Sensitive values (like tokens) SHOULD be provided via env vars in production.
+ */
+const ENV_OVERRIDES = {
+  ONESIBOX_SERVER_URL: 'server_url',
+  ONESIBOX_APPLIANCE_ID: 'appliance_id',
+  ONESIBOX_TOKEN: 'appliance_token',
+  ONESIBOX_POLLING_INTERVAL: 'polling_interval_seconds',
+  ONESIBOX_HEARTBEAT_INTERVAL: 'heartbeat_interval_seconds',
+  ONESIBOX_DEFAULT_VOLUME: 'default_volume'
+};
+
+/**
+ * Apply environment variable overrides to config.
+ * Environment variables take precedence over config file values.
+ * @param {object} config - The config object to modify
+ */
+function applyEnvOverrides(config) {
+  for (const [envVar, configKey] of Object.entries(ENV_OVERRIDES)) {
+    const value = process.env[envVar];
+    if (value !== undefined) {
+      // Parse numeric values
+      if (['polling_interval_seconds', 'heartbeat_interval_seconds', 'default_volume'].includes(configKey)) {
+        const numValue = parseInt(value, 10);
+        if (!isNaN(numValue)) {
+          config[configKey] = numValue;
+        }
+      } else {
+        config[configKey] = value;
+      }
+    }
+  }
+}
+
 function validateConfig(config) {
   const errors = [];
 
   if (!config.server_url || !URL_REGEX.test(config.server_url)) {
-    errors.push('server_url must be a valid HTTPS URL');
+    errors.push('server_url must be a valid HTTPS URL (set via config or ONESIBOX_SERVER_URL env var)');
   }
 
   if (!config.appliance_id || !UUID_REGEX.test(config.appliance_id)) {
-    errors.push('appliance_id must be a valid UUID');
+    errors.push('appliance_id must be a valid UUID (set via config or ONESIBOX_APPLIANCE_ID env var)');
   }
 
   if (!config.appliance_token || typeof config.appliance_token !== 'string') {
-    errors.push('appliance_token is required');
+    errors.push('appliance_token is required (set via config or ONESIBOX_TOKEN env var)');
   }
 
   if (config.polling_interval_seconds !== undefined) {
@@ -50,18 +85,23 @@ function validateConfig(config) {
 }
 
 function loadConfig() {
-  if (!fs.existsSync(CONFIG_PATH)) {
-    throw new Error(`Configuration file not found: ${CONFIG_PATH}`);
+  let config = {};
+
+  // Load from config file if it exists
+  if (fs.existsSync(CONFIG_PATH)) {
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
+
+    try {
+      config = JSON.parse(raw);
+    } catch (e) {
+      throw new Error(`Invalid JSON in configuration file: ${e.message}`);
+    }
+  } else {
+    logger.info('Config file not found, using environment variables only', { path: CONFIG_PATH });
   }
 
-  const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-  let config;
-
-  try {
-    config = JSON.parse(raw);
-  } catch (e) {
-    throw new Error(`Invalid JSON in configuration file: ${e.message}`);
-  }
+  // Apply environment variable overrides (takes precedence over config file)
+  applyEnvOverrides(config);
 
   const errors = validateConfig(config);
   if (errors.length > 0) {
@@ -78,12 +118,14 @@ function loadConfig() {
     update_check_interval_seconds: config.update_check_interval_seconds ?? 1800 // 30 minutes
   };
 
+  // Log config without sensitive token
   logger.info('Configuration loaded successfully', {
     server_url: finalConfig.server_url,
     appliance_id: finalConfig.appliance_id,
     polling_interval_seconds: finalConfig.polling_interval_seconds,
     heartbeat_interval_seconds: finalConfig.heartbeat_interval_seconds,
-    update_check_interval_seconds: finalConfig.update_check_interval_seconds
+    update_check_interval_seconds: finalConfig.update_check_interval_seconds,
+    token_source: process.env.ONESIBOX_TOKEN ? 'environment' : 'config_file'
   });
 
   return finalConfig;

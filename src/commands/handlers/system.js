@@ -1,24 +1,28 @@
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const logger = require('../../logging/logger');
 const { stateManager } = require('../../state/state-manager');
 
+const execFileAsync = promisify(execFile);
+
 /**
- * Execute a system command with sudo.
- * @param {string} command - The command to execute
+ * Execute a system command with sudo using execFile (no shell).
+ * This is safer than exec() as it doesn't spawn a shell and prevents command injection.
+ * @param {string} command - The command to execute (e.g., 'shutdown', 'reboot')
+ * @param {string[]} args - Array of arguments
  * @returns {Promise<void>}
  */
-function executeSystemCommand(command) {
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        logger.error('System command failed', { command, error: error.message, stderr });
-        reject(error);
-        return;
-      }
-      logger.info('System command executed', { command, stdout });
-      resolve();
-    });
-  });
+async function executeSystemCommand(command, args = []) {
+  const fullArgs = ['sudo', command, ...args];
+  const logCommand = fullArgs.join(' ');
+
+  try {
+    const { stdout } = await execFileAsync('sudo', [command, ...args]);
+    logger.info('System command executed', { command: logCommand, stdout });
+  } catch (error) {
+    logger.error('System command failed', { command: logCommand, error: error.message });
+    throw error;
+  }
 }
 
 /**
@@ -41,13 +45,13 @@ async function reboot(command, browserController) {
 
   if (delay > 0) {
     logger.info('Scheduling reboot', { delaySeconds: delay });
-    await executeSystemCommand(`sudo shutdown -r +${Math.ceil(delay / 60)}`);
+    await executeSystemCommand('shutdown', ['-r', `+${Math.ceil(delay / 60)}`]);
   } else {
     logger.info('Executing immediate reboot');
     // Small delay to allow acknowledgment to be sent
     setTimeout(async () => {
       try {
-        await executeSystemCommand('sudo reboot');
+        await executeSystemCommand('reboot', []);
       } catch (error) {
         logger.error('Reboot execution failed', { error: error.message });
       }
@@ -75,13 +79,13 @@ async function shutdown(command, browserController) {
 
   if (delay > 0) {
     logger.info('Scheduling shutdown', { delaySeconds: delay });
-    await executeSystemCommand(`sudo shutdown -h +${Math.ceil(delay / 60)}`);
+    await executeSystemCommand('shutdown', ['-h', `+${Math.ceil(delay / 60)}`]);
   } else {
     logger.info('Executing immediate shutdown');
     // Small delay to allow acknowledgment to be sent
     setTimeout(async () => {
       try {
-        await executeSystemCommand('sudo shutdown -h now');
+        await executeSystemCommand('shutdown', ['-h', 'now']);
       } catch (error) {
         logger.error('Shutdown execution failed', { error: error.message });
       }
