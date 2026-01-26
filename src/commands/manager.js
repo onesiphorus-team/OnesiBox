@@ -7,6 +7,7 @@ const COMMAND_PRIORITY = {
   // System commands - highest priority
   reboot: 1,
   shutdown: 1,
+  restart_service: 1,
   // Video calls - high priority
   join_zoom: 1,
   leave_zoom: 1,

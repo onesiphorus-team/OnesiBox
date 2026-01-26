@@ -13,7 +13,8 @@ const ERROR_CODES = {
   COMMAND_EXPIRED: 'E009',
   INVALID_PAYLOAD: 'E010',
   SYSTEM_HANDLER_FAILED: 'E011',
-  DIAGNOSTICS_HANDLER_FAILED: 'E012'
+  DIAGNOSTICS_HANDLER_FAILED: 'E012',
+  SERVICE_HANDLER_FAILED: 'E013'
 };
 
 /**
@@ -52,6 +53,7 @@ const COMMAND_TYPES = [
   'leave_zoom',
   'reboot',
   'shutdown',
+  'restart_service',
   'get_system_info',
   'get_logs'
 ];
@@ -274,6 +276,7 @@ function validateCommand(command) {
       break;
 
     case 'get_system_info':
+    case 'restart_service':
       // No payload required
       break;
   }
@@ -328,6 +331,8 @@ function getErrorCodeForCommandType(commandType) {
     case 'reboot':
     case 'shutdown':
       return ERROR_CODES.SYSTEM_HANDLER_FAILED;
+    case 'restart_service':
+      return ERROR_CODES.SERVICE_HANDLER_FAILED;
     case 'get_system_info':
     case 'get_logs':
       return ERROR_CODES.DIAGNOSTICS_HANDLER_FAILED;
