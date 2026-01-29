@@ -186,7 +186,7 @@ Prima di installare OnesiBox sul Raspberry Pi, devi registrare il dispositivo su
 ### 4.1 Accedi al pannello
 
 1. Apri il browser e vai all'indirizzo del pannello Onesiforo
-   (es: `https://onesiforo.tuodominio.it`)
+   (es: `https://onesiforo.a80.it`)
 
 2. Effettua il login con le tue credenziali
 
