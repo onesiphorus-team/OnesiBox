@@ -180,6 +180,7 @@ La documentazione completa è disponibile nella cartella `/docs`:
 
 | Documento | Descrizione |
 |-----------|-------------|
+| [**Manuale Installazione**](docs/manuale-installazione.md) | **Guida passo-passo per installare OnesiBox su Raspberry Pi** |
 | [Guida Sviluppatore](docs/guida-sviluppatore.md) | Setup ambiente, come contribuire, convenzioni |
 | [Architettura Implementazione](docs/architettura-implementazione.md) | Architettura dettagliata con diagrammi Mermaid |
 | [Architettura Client](docs/architettura-client.md) | Panoramica architetturale e decisioni |
@@ -194,11 +195,41 @@ La documentazione completa è disponibile nella cartella `/docs`:
 
 ## Deploy su Raspberry Pi
 
-### Setup Automatico
+### Installazione Rapida (Consigliata)
+
+Lo script interattivo guida attraverso l'intera installazione:
 
 ```bash
-# Sul Raspberry Pi
+# Scarica ed esegui in un comando (richiede connessione internet)
+curl -sSL https://raw.githubusercontent.com/onesiphorus-team/onesibox-client/main/install.sh | sudo bash
+
+# Oppure, se hai già clonato il repository:
+sudo ./install.sh
+```
+
+Lo script chiederà:
+1. **Nome dispositivo** - Un nome descrittivo (es: "Casa Nonna Maria")
+2. **URL del server** - L'indirizzo del pannello Onesiforo
+3. **Appliance ID** - UUID del dispositivo (o ne genera uno automatico)
+4. **Token** - Il token di autenticazione dal server
+
+### Riconfigurazione
+
+Per cambiare server, token o altre impostazioni senza reinstallare:
+
+```bash
+sudo ./reconfigure.sh
+```
+
+### Setup Manuale (Avanzato)
+
+```bash
+# Esegui lo script base
 sudo ./scripts/setup.sh
+
+# Poi configura manualmente
+cp config/config.json.example config/config.json
+nano config/config.json
 ```
 
 ### Verifica Deployment
