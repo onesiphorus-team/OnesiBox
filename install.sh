@@ -6,7 +6,7 @@
 # su un Raspberry Pi con Raspberry Pi OS (Bookworm 64-bit)
 #
 # Utilizzo:
-#   curl -sSL https://raw.githubusercontent.com/onesiphorus-team/onesibox-client/main/install.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
 #   oppure:
 #   sudo ./install.sh
 # ============================================================================
@@ -27,7 +27,8 @@ INSTALL_DIR="/opt/onesibox"
 LOG_DIR="/var/log/onesibox"
 SERVICE_USER="onesibox"
 CONFIG_FILE="$INSTALL_DIR/config/config.json"
-REPO_URL="https://github.com/onesiphorus-team/onesibox-client.git"
+REPO_URL="https://github.com/onesiphorus-team/OnesiBox.git"
+DEFAULT_SERVER_URL="https://onesiforo.a80.it"
 
 # ============================================================================
 # Funzioni di utilità
@@ -204,9 +205,10 @@ collect_configuration() {
     # URL Server
     echo -e "${BOLD}2. URL del Server Onesiforo${NC}"
     echo -e "   ${YELLOW}L'indirizzo del server dove si trova il pannello di controllo.${NC}"
-    echo -e "   ${YELLOW}Esempio: https://onesiforo.tuodominio.it${NC}"
+    echo -e "   ${YELLOW}Premi Invio per usare il server predefinito: $DEFAULT_SERVER_URL${NC}"
     while true; do
-        read -r -p "   URL: " SERVER_URL
+        read -r -p "   URL [$DEFAULT_SERVER_URL]: " SERVER_URL
+        SERVER_URL=${SERVER_URL:-$DEFAULT_SERVER_URL}
         SERVER_URL="${SERVER_URL%/}"  # Rimuovi trailing slash
 
         if [ -z "$SERVER_URL" ]; then
@@ -643,7 +645,7 @@ print_summary() {
 
     echo -e "\n${BOLD}Supporto:${NC}"
     echo -e "  • Documentazione: ${CYAN}$INSTALL_DIR/docs/${NC}"
-    echo -e "  • Issues: ${CYAN}https://github.com/onesiphorus-team/onesibox-client/issues${NC}"
+    echo -e "  • Issues: ${CYAN}https://github.com/onesiphorus-team/OnesiBox/issues${NC}"
 
     echo -e "\n"
 }

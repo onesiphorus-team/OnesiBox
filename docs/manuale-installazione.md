@@ -242,12 +242,12 @@ ssh pi@INDIRIZZO_IP
 Esegui questo comando per scaricare e avviare l'installatore:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/onesiphorus-team/onesibox-client/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
 ```
 
 > 💡 Se il comando sopra non funziona, prova:
 > ```bash
-> wget -qO- https://raw.githubusercontent.com/onesiphorus-team/onesibox-client/main/install.sh | sudo bash
+> wget -qO- https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
 > ```
 
 ### 5.3 Segui la procedura guidata
@@ -293,15 +293,15 @@ L'installatore verificherà automaticamente che tutto sia a posto.
 ```
 2. URL del Server Onesiforo
    L'indirizzo del server dove si trova il pannello di controllo.
-   Esempio: https://onesiforo.tuodominio.it
-   URL: █
+   Premi Invio per usare il server predefinito: https://onesiforo.a80.it
+   URL [https://onesiforo.a80.it]: █
 ```
 
 **Cosa inserire:** L'indirizzo web del pannello Onesiforo.
 
-**Esempio:** `https://onesiforo.example.com`
+**Default:** Premi Invio per usare `https://onesiforo.a80.it` (server ufficiale)
 
-> ⚠️ Inserisci l'URL completo, incluso `https://`
+**Altro server:** Inserisci l'URL completo, incluso `https://`
 
 ---
 
@@ -766,7 +766,7 @@ Se hai problemi non risolti da questo manuale:
 
 1. **Controlla i log** per messaggi di errore specifici
 2. **Consulta la documentazione** nella cartella `/opt/onesibox/docs/`
-3. **Apri una issue** su GitHub: https://github.com/onesiphorus-team/onesibox-client/issues
+3. **Apri una issue** su GitHub: https://github.com/onesiphorus-team/OnesiBox/issues
 
 ---
 
