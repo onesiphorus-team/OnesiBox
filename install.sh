@@ -457,6 +457,20 @@ setup_user_and_directories() {
     chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
     chown -R "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"
     print_success "Permessi configurati"
+
+    # Configura sudoers per comandi di sistema (reboot, shutdown, service control, volume)
+    print_info "Configurazione permessi sudo..."
+    cat > /etc/sudoers.d/onesibox << EOF
+# OnesiBox - permessi per comandi di sistema
+$SERVICE_USER ALL=(ALL) NOPASSWD: /sbin/reboot
+$SERVICE_USER ALL=(ALL) NOPASSWD: /sbin/shutdown
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart onesibox
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop onesibox
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl start onesibox
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/amixer
+EOF
+    chmod 440 /etc/sudoers.d/onesibox
+    print_success "Permessi sudo configurati"
 }
 
 # ============================================================================
