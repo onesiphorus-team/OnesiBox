@@ -416,20 +416,30 @@ install_system_packages() {
     apt install -y -qq git
     print_success "Git installato"
 
-    # Chromium (per fallback)
-    print_info "Installazione Chromium..."
-    apt install -y -qq chromium 2>/dev/null || apt install -y -qq chromium-browser 2>/dev/null || true
-    print_success "Chromium installato"
+    # Chromium con codec video (H.264/MP4)
+    print_info "Installazione Chromium con codec video..."
+    apt install -y -qq chromium chromium-codecs-ffmpeg-extra 2>/dev/null || \
+    apt install -y -qq chromium-browser chromium-codecs-ffmpeg-extra 2>/dev/null || \
+    apt install -y -qq chromium 2>/dev/null || \
+    apt install -y -qq chromium-browser 2>/dev/null || true
+    # Verifica codec
+    if dpkg -l | grep -q "chromium-codecs-ffmpeg-extra"; then
+        print_success "Chromium installato con codec H.264"
+    else
+        print_warning "Codec extra non disponibili, video MP4 potrebbero non funzionare"
+    fi
 
     # labwc e dipendenze Wayland
     print_info "Installazione labwc e dipendenze Wayland..."
     apt install -y -qq labwc seatd 2>/dev/null || true
     print_success "labwc installato"
 
-    # Audio
-    print_info "Installazione strumenti audio..."
+    # Audio e codec multimediali
+    print_info "Installazione strumenti audio e codec..."
     apt install -y -qq alsa-utils pulseaudio
-    print_success "Strumenti audio installati"
+    # Codec video aggiuntivi per compatibilità
+    apt install -y -qq ffmpeg gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad 2>/dev/null || true
+    print_success "Strumenti audio e codec installati"
 
     # Utilities
     print_info "Installazione utilities..."
@@ -513,10 +523,11 @@ install_application() {
     npm install --production --silent 2>/dev/null || npm install --production
     print_success "Dipendenze npm installate"
 
-    # Installa Playwright browser
-    print_info "Installazione browser Playwright..."
-    sudo -u "$KIOSK_USER" npx playwright install chromium
-    print_success "Browser Playwright installato"
+    # Installa dipendenze Playwright (ma useremo Chromium di sistema per i codec)
+    print_info "Installazione dipendenze Playwright..."
+    sudo -u "$KIOSK_USER" npx playwright install-deps chromium 2>/dev/null || true
+    # Non installiamo il browser Playwright perché usiamo quello di sistema per i codec video
+    print_success "Dipendenze Playwright installate (usa Chromium di sistema per codec H.264)"
 
     # Imposta permessi
     chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
