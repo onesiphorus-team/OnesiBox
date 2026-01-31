@@ -7,11 +7,25 @@ const STANDBY_URL = 'http://localhost:3000';
 const LOCAL_URL_PREFIX = 'http://localhost:3000/';
 
 // Find system Chromium executable
+// Priority: CHROMIUM_BIN env var > system paths > Playwright bundled
 function findChromiumPath() {
+  // 1. Check environment variable first
+  if (process.env.CHROMIUM_BIN) {
+    try {
+      execSync(`test -x ${process.env.CHROMIUM_BIN}`, { stdio: 'ignore' });
+      return process.env.CHROMIUM_BIN;
+    } catch {
+      // Env var set but path invalid, continue to fallbacks
+    }
+  }
+
+  // 2. Check common system paths
   const paths = [
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
     '/snap/bin/chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
   ];
 
   for (const p of paths) {
@@ -23,7 +37,7 @@ function findChromiumPath() {
     }
   }
 
-  // Fallback: let Playwright use its bundled browser
+  // 3. Fallback: let Playwright use its bundled browser
   return null;
 }
 
