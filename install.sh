@@ -650,15 +650,36 @@ setup_kiosk_service() {
         sed -i '/^\[Seat:\*\]/,/^$/d' /etc/lightdm/lightdm.conf 2>/dev/null || true
         sed -i '/^autologin-/d' /etc/lightdm/lightdm.conf 2>/dev/null || true
 
+        # Detect available Wayland session (labwc on Debian, PIXEL on RPi OS)
+        WAYLAND_SESSION=""
+        if [ -f /usr/share/wayland-sessions/labwc.desktop ]; then
+            WAYLAND_SESSION="labwc"
+        elif [ -f /usr/share/wayland-sessions/PIXEL.desktop ]; then
+            WAYLAND_SESSION="PIXEL"
+        elif [ -f /usr/share/wayland-sessions/wayfire.desktop ]; then
+            WAYLAND_SESSION="wayfire"
+        fi
+
         # Aggiungi configurazione autologin
-        cat >> /etc/lightdm/lightdm.conf << EOF
+        if [ -n "$WAYLAND_SESSION" ]; then
+            print_info "Sessione Wayland rilevata: $WAYLAND_SESSION"
+            cat >> /etc/lightdm/lightdm.conf << EOF
 
 [Seat:*]
 autologin-user=$SERVICE_USER
 autologin-user-timeout=0
-autologin-session=labwc
-user-session=labwc
+autologin-session=$WAYLAND_SESSION
+user-session=$WAYLAND_SESSION
 EOF
+        else
+            print_warning "Nessuna sessione Wayland trovata, uso configurazione X11"
+            cat >> /etc/lightdm/lightdm.conf << EOF
+
+[Seat:*]
+autologin-user=$SERVICE_USER
+autologin-user-timeout=0
+EOF
+        fi
         print_success "Autologin lightdm configurato"
     else
         print_warning "lightdm.conf non trovato, autologin non configurato"
