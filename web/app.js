@@ -6,6 +6,7 @@ const statusText = document.getElementById('statusText');
 const versionInfo = document.getElementById('versionInfo');
 const ipInfo = document.getElementById('ipInfo');
 const wifiInfo = document.getElementById('wifiInfo');
+const volumeInfo = document.getElementById('volumeInfo');
 const particlesContainer = document.getElementById('particles');
 
 const STATUS_MESSAGES = {
@@ -50,6 +51,11 @@ function checkServerStatus() {
     })
     .then(data => {
       setConnectionStatus(data.connectionStatus || 'connected');
+      // Update volume display
+      if (data.volume !== undefined && volumeInfo) {
+        const volumeIcon = data.volume === 0 ? '🔇' : data.volume < 50 ? '🔉' : '🔊';
+        volumeInfo.textContent = `${volumeIcon} ${data.volume}%`;
+      }
     })
     .catch(() => {
       setConnectionStatus('reconnecting');
