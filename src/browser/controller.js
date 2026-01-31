@@ -8,6 +8,11 @@ const execFileAsync = promisify(execFile);
 const STANDBY_URL = 'http://localhost:3000';
 const LOCAL_URL_PREFIX = 'http://localhost:3000/';
 
+// Chromium binary - configurable via environment variable
+// Default: 'chromium' (Debian 12+/Raspberry Pi OS Bookworm)
+// Alternative: 'chromium-browser' (older Debian/Ubuntu)
+const CHROMIUM_BIN = process.env.CHROMIUM_BIN || 'chromium';
+
 /**
  * Check if URL is a local application URL (localhost:3000)
  */
@@ -335,14 +340,14 @@ class BrowserController {
       ];
 
       // Use spawn with detached option instead of exec with '&'
-      const child = spawn('chromium-browser', chromiumArgs, {
+      const child = spawn(CHROMIUM_BIN, chromiumArgs, {
         detached: true,
         stdio: 'ignore'
       });
 
       // Track our browser PID for selective termination
       this.browserPid = child.pid;
-      logger.info('Browser launched', { pid: this.browserPid, url });
+      logger.info('Browser launched', { binary: CHROMIUM_BIN, pid: this.browserPid, url });
 
       child.unref();
 
