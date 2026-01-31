@@ -100,12 +100,24 @@ test_server_connection() {
 
     print_info "Verifico connessione a $url..."
 
-    if curl -sSf --connect-timeout "$timeout" "$url" > /dev/null 2>&1; then
-        return 0
-    fi
-
-    # Prova anche con /api/v1 endpoint
-    if curl -sSf --connect-timeout "$timeout" "$url/api/v1" > /dev/null 2>&1; then
+    # Try curl first, then wget as fallback
+    if command -v curl &> /dev/null; then
+        if curl -sSf --connect-timeout "$timeout" "$url" > /dev/null 2>&1; then
+            return 0
+        fi
+        if curl -sSf --connect-timeout "$timeout" "$url/api/v1" > /dev/null 2>&1; then
+            return 0
+        fi
+    elif command -v wget &> /dev/null; then
+        if wget -q --timeout="$timeout" --spider "$url" 2>/dev/null; then
+            return 0
+        fi
+        if wget -q --timeout="$timeout" --spider "$url/api/v1" 2>/dev/null; then
+            return 0
+        fi
+    else
+        # Neither curl nor wget available, skip test
+        print_warning "curl/wget non disponibili, test connessione saltato"
         return 0
     fi
 
