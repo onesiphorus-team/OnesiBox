@@ -36,7 +36,7 @@ apt install -y \
 
 echo ""
 echo "Step 4: Installing audio tools..."
-apt install -y alsa-utils
+apt install -y alsa-utils pulseaudio
 
 echo ""
 echo "Step 5: Installing webcam tools..."
@@ -48,6 +48,19 @@ if ! id "onesibox" &>/dev/null; then
   useradd -m -s /bin/bash onesibox
   usermod -aG video,audio,input onesibox
 fi
+
+echo ""
+echo "Step 6b: Configuring sudo permissions..."
+cat > /etc/sudoers.d/onesibox << EOF
+# OnesiBox - permessi per comandi di sistema
+onesibox ALL=(ALL) NOPASSWD: /sbin/reboot
+onesibox ALL=(ALL) NOPASSWD: /sbin/shutdown
+onesibox ALL=(ALL) NOPASSWD: /bin/systemctl restart onesibox
+onesibox ALL=(ALL) NOPASSWD: /bin/systemctl stop onesibox
+onesibox ALL=(ALL) NOPASSWD: /bin/systemctl start onesibox
+onesibox ALL=(ALL) NOPASSWD: /usr/bin/amixer
+EOF
+chmod 440 /etc/sudoers.d/onesibox
 
 echo ""
 echo "Step 7: Setting up application directory..."
