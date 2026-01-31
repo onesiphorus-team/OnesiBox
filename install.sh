@@ -656,6 +656,8 @@ setup_kiosk_service() {
 [Seat:*]
 autologin-user=$SERVICE_USER
 autologin-user-timeout=0
+autologin-session=labwc
+user-session=labwc
 EOF
         print_success "Autologin lightdm configurato"
     else
