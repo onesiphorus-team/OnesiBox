@@ -15,7 +15,8 @@ Environment=NODE_ENV=production
 WorkingDirectory=/opt/onesibox
 
 # Sicurezza
-NoNewPrivileges=true
+# NOTA: NoNewPrivileges=true non puo' essere usato perche' il servizio
+# ha bisogno di sudo per comandi di reboot/restart (via /etc/sudoers.d/onesibox)
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/onesibox /var/log/onesibox

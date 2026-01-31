@@ -575,7 +575,8 @@ Environment=NODE_ENV=production
 WorkingDirectory=$INSTALL_DIR
 
 # Sicurezza
-NoNewPrivileges=true
+# NOTA: NoNewPrivileges=true non puo' essere usato perche' il servizio
+# ha bisogno di sudo per comandi di reboot/restart (via /etc/sudoers.d/onesibox)
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$INSTALL_DIR $LOG_DIR
