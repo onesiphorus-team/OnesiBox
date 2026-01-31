@@ -119,7 +119,8 @@ class BrowserController {
 
       // Create persistent user data directory with Crash Reports folder
       // This is required for system Chromium on ARM64 where crashpad needs the database
-      const userDataDir = path.join(os.homedir(), '.config', 'chromium-onesibox');
+      // Use /opt/onesibox/data because systemd service uses ProtectHome=true
+      const userDataDir = '/opt/onesibox/data/chromium';
       const crashReportsDir = path.join(userDataDir, 'Crash Reports');
 
       try {
