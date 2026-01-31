@@ -1,8 +1,5 @@
 const { chromium } = require('playwright');
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const { spawn, execSync } = require('child_process');
 const logger = require('../logging/logger');
 const { isUrlAllowed, isZoomUrl } = require('../commands/validator');
 
@@ -10,9 +7,7 @@ const STANDBY_URL = 'http://localhost:3000';
 const LOCAL_URL_PREFIX = 'http://localhost:3000/';
 
 // Find system Chromium executable
-// Priority: CHROMIUM_BIN env var > system paths > Playwright bundled
 function findChromiumPath() {
-  // 1. Check environment variable first
   if (process.env.CHROMIUM_BIN) {
     try {
       execSync(`test -x ${process.env.CHROMIUM_BIN}`, { stdio: 'ignore' });
@@ -22,7 +17,6 @@ function findChromiumPath() {
     }
   }
 
-  // 2. Check common system paths
   const paths = [
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
@@ -40,7 +34,6 @@ function findChromiumPath() {
     }
   }
 
-  // 3. Fallback: let Playwright use its bundled browser
   return null;
 }
 
@@ -53,22 +46,24 @@ function isLocalUrl(url) {
 
 /**
  * Controls the Chromium browser for media playback and navigation.
- * Uses Playwright for browser automation - works on both X11 and Wayland.
+ * Uses direct process spawn for basic navigation, Playwright for advanced control.
  *
  * SECURITY: All URLs are validated before navigation.
  */
 class BrowserController {
   constructor() {
     this.currentUrl = STANDBY_URL;
-    this.browser = null;
-    this.context = null;
+    this.browserProcess = null;
+    this.playwrightContext = null;
     this.page = null;
     this.isInitialized = false;
+    this.usePlaywright = false; // Will try Playwright first, fall back to spawn
+    this.chromiumPath = null;
+    this.launchArgs = [];
   }
 
   /**
    * Initialize the browser on startup.
-   * Launches Chromium in kiosk mode using Playwright.
    */
   async initialize() {
     if (this.isInitialized) {
@@ -76,127 +71,156 @@ class BrowserController {
       return;
     }
 
-    logger.info('Initializing browser controller with Playwright');
+    logger.info('Initializing browser controller');
+
+    // Detect display server
+    const isWayland = process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === 'wayland';
+    logger.info('Display server detected', { isWayland, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY });
+
+    // Common browser arguments
+    this.launchArgs = [
+      '--kiosk',
+      '--noerrdialogs',
+      '--disable-infobars',
+      '--no-first-run',
+      '--autoplay-policy=no-user-gesture-required',
+      '--disable-session-crashed-bubble',
+      '--disable-features=TranslateUI',
+      '--check-for-update-interval=31536000',
+      '--disable-component-update',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-default-apps',
+      '--start-fullscreen',
+      '--no-sandbox',
+    ];
+
+    if (isWayland) {
+      this.launchArgs.push(
+        '--ozone-platform=wayland',
+        '--enable-features=UseOzonePlatform'
+      );
+      logger.info('Added Wayland-specific browser flags');
+    }
+
+    // Try Playwright with bundled browser first (better for Zoom control)
+    try {
+      await this._initPlaywright();
+      this.usePlaywright = true;
+      logger.info('Using Playwright mode');
+    } catch (playwrightError) {
+      logger.warn('Playwright failed, falling back to direct spawn', { error: playwrightError.message });
+      this.usePlaywright = false;
+
+      // Fall back to direct spawn
+      this.chromiumPath = findChromiumPath();
+      if (!this.chromiumPath) {
+        throw new Error('No browser available');
+      }
+      await this._launchBrowserDirect(STANDBY_URL);
+    }
+
+    this.isInitialized = true;
+    logger.info('Browser controller initialized', { mode: this.usePlaywright ? 'playwright' : 'spawn' });
+  }
+
+  /**
+   * Initialize using Playwright with bundled Chromium
+   */
+  async _initPlaywright() {
+    // Use Playwright's bundled browser (not system Chromium)
+    // This avoids crashpad issues on ARM64
+    this.playwrightContext = await chromium.launchPersistentContext(
+      '/opt/onesibox/data/playwright-profile',
+      {
+        headless: false,
+        args: this.launchArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
+        viewport: null,
+        ignoreHTTPSErrors: true,
+        // Don't specify executablePath - use Playwright's bundled browser
+      }
+    );
+
+    const pages = this.playwrightContext.pages();
+    this.page = pages.length > 0 ? pages[0] : await this.playwrightContext.newPage();
+
+    await this.page.goto(STANDBY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    this.currentUrl = STANDBY_URL;
+
+    this.page.on('crash', async () => {
+      logger.error('Page crashed, attempting recovery');
+      await this._recoverFromCrash();
+    });
+  }
+
+  /**
+   * Launch browser directly with spawn (fallback mode)
+   */
+  async _launchBrowserDirect(url) {
+    await this._killBrowserDirect();
+    await this._delay(200);
+
+    const args = [...this.launchArgs, '--user-data-dir=/opt/onesibox/data/chromium', url];
+
+    logger.info('Launching browser directly', { url });
+
+    this.browserProcess = spawn(this.chromiumPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+      env: {
+        ...process.env,
+        DISPLAY: process.env.DISPLAY || ':0',
+        WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || 'wayland-0',
+        XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`,
+      }
+    });
+
+    this.browserProcess.on('error', (err) => {
+      logger.error('Browser process error', { error: err.message });
+    });
+
+    this.browserProcess.on('exit', (code, signal) => {
+      logger.info('Browser process exited', { code, signal });
+      this.browserProcess = null;
+    });
+
+    this.currentUrl = url;
+    await this._delay(1000);
+  }
+
+  /**
+   * Kill direct browser process
+   */
+  async _killBrowserDirect() {
+    if (this.browserProcess && !this.browserProcess.killed) {
+      try {
+        this.browserProcess.kill('SIGTERM');
+        await this._delay(500);
+        if (!this.browserProcess.killed) {
+          this.browserProcess.kill('SIGKILL');
+        }
+      } catch (err) {
+        logger.debug('Error killing browser', { error: err.message });
+      }
+    }
+    this.browserProcess = null;
 
     try {
-      // Detect display server (Wayland or X11)
-      const isWayland = process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === 'wayland';
-      logger.info('Display server detected', { isWayland, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY });
-
-      // Browser launch arguments for kiosk mode
-      const launchArgs = [
-        '--kiosk',
-        '--noerrdialogs',
-        '--disable-infobars',
-        '--no-first-run',
-        '--autoplay-policy=no-user-gesture-required',
-        '--disable-session-crashed-bubble',
-        '--disable-features=TranslateUI',
-        '--check-for-update-interval=31536000',
-        '--disable-component-update',
-        '--disable-background-networking',
-        '--disable-sync',
-        '--disable-default-apps',
-        '--start-fullscreen',
-        '--use-fake-ui-for-media-stream',
-        '--disable-crashpad',
-        '--disable-crash-reporter',
-        '--disable-breakpad',
-      ];
-
-      // Add Wayland-specific flags if running on Wayland
-      if (isWayland) {
-        launchArgs.push(
-          '--enable-features=UseOzonePlatform',
-          '--ozone-platform=wayland',
-          '--enable-features=WebRTCPipeWireCapturer'
-        );
-        logger.info('Added Wayland-specific browser flags');
-      }
-
-      // Find system Chromium or use Playwright's bundled browser
-      const chromiumPath = findChromiumPath();
-
-      // Create persistent user data directory with Crash Reports folder
-      // This is required for system Chromium on ARM64 where crashpad needs the database
-      // Use /opt/onesibox/data because systemd service uses ProtectHome=true
-      const userDataDir = '/opt/onesibox/data/chromium';
-      const crashReportsDir = path.join(userDataDir, 'Crash Reports');
-
-      try {
-        fs.mkdirSync(crashReportsDir, { recursive: true });
-        logger.debug('Created crash reports directory', { path: crashReportsDir });
-      } catch (err) {
-        logger.warn('Could not create crash reports directory', { error: err.message });
-      }
-
-      const launchOptions = {
-        headless: false,
-        args: launchArgs,
-        ignoreDefaultArgs: ['--enable-automation'],
-      };
-
-      // Use system Chromium if available (required for Raspberry Pi)
-      if (chromiumPath) {
-        launchOptions.executablePath = chromiumPath;
-        logger.info('Using system Chromium', { path: chromiumPath });
-      } else {
-        logger.info('Using Playwright bundled Chromium');
-      }
-
-      // Launch browser with persistent context to use persistent user data directory
-      // This fixes crashpad issues on ARM64 where the Crash Reports directory must exist
-      this.context = await chromium.launchPersistentContext(userDataDir, {
-        ...launchOptions,
-        viewport: null, // Use full screen
-        ignoreHTTPSErrors: true,
-      });
-
-      // Get browser reference from context
-      this.browser = this.context.browser();
-
-      // Get or create main page
-      const pages = this.context.pages();
-      this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
-
-      // Navigate to standby
-      await this.page.goto(STANDBY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      this.currentUrl = STANDBY_URL;
-
-      // Handle page crashes
-      this.page.on('crash', async () => {
-        logger.error('Page crashed, attempting recovery');
-        await this._recoverFromCrash();
-      });
-
-      // Handle browser disconnection
-      this.browser.on('disconnected', async () => {
-        logger.error('Browser disconnected, attempting restart');
-        this.isInitialized = false;
-        await this.initialize();
-      });
-
-      this.isInitialized = true;
-      logger.info('Browser controller initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize browser', { error: error.message });
-      throw error;
+      execSync('pkill -f "chromium.*user-data-dir=/opt/onesibox"', { stdio: 'ignore' });
+    } catch {
+      // Ignore
     }
   }
 
   /**
    * Navigate the browser to a URL.
-   * URL must be in the whitelist, a local URL, or Zoom URL.
-   *
-   * @param {string} url - The URL to navigate to
-   * @throws {Error} If URL is not allowed or navigation fails
    */
   async navigateTo(url) {
     if (!isUrlAllowed(url) && !isZoomUrl(url) && !isLocalUrl(url)) {
       throw new Error(`URL not allowed: ${url}`);
     }
 
-    // Additional sanitization for non-local URLs
     if (!isLocalUrl(url) && this._containsShellMetacharacters(url)) {
       throw new Error('URL contains invalid characters');
     }
@@ -206,35 +230,23 @@ class BrowserController {
     try {
       await this._ensureBrowserReady();
 
-      // Stop any playing media first
-      await this._stopAllMedia();
+      if (this.usePlaywright && this.page) {
+        await this._stopAllMedia();
+        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        this.currentUrl = url;
+      } else {
+        await this._launchBrowserDirect(url);
+      }
 
-      // Navigate to new URL
-      await this.page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      });
-
-      this.currentUrl = url;
       logger.info('Navigation successful', { url });
     } catch (error) {
       logger.error('Navigation failed', { url, error: error.message });
-
-      // Try to recover
-      try {
-        await this._recoverFromCrash();
-        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        this.currentUrl = url;
-      } catch (retryError) {
-        logger.error('Navigation retry failed', { error: retryError.message });
-        throw error;
-      }
+      throw error;
     }
   }
 
   /**
    * Navigate back to the standby screen.
-   * Stops any playing media first, then navigates.
    */
   async goToStandby() {
     logger.info('Going to standby');
@@ -242,35 +254,30 @@ class BrowserController {
     try {
       await this._ensureBrowserReady();
 
-      // Stop any media playback
-      await this._stopAllMedia();
+      if (this.usePlaywright && this.page) {
+        await this._stopAllMedia();
+        await this._delay(100);
+        await this.page.goto(STANDBY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        this.currentUrl = STANDBY_URL;
+      } else {
+        await this._launchBrowserDirect(STANDBY_URL);
+      }
 
-      // Small delay to ensure media is stopped
-      await this._delay(100);
-
-      // Navigate to standby
-      await this.page.goto(STANDBY_URL, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      });
-
-      this.currentUrl = STANDBY_URL;
       logger.info('Navigated to standby successfully');
     } catch (error) {
-      logger.warn('Failed to navigate to standby cleanly', { error: error.message });
-
-      // Try recovery
+      logger.warn('Failed to navigate to standby', { error: error.message });
       await this._recoverFromCrash();
     }
   }
 
   /**
-   * Stop all media playback in the browser using JavaScript.
+   * Stop all media playback (Playwright mode only)
    */
   async _stopAllMedia() {
+    if (!this.usePlaywright || !this.page) return;
+
     try {
       await this.page.evaluate(() => {
-        // Stop all video and audio elements
         document.querySelectorAll('video, audio').forEach(el => {
           el.pause();
           el.currentTime = 0;
@@ -280,29 +287,26 @@ class BrowserController {
       });
       logger.debug('Media stop script executed');
     } catch (error) {
-      // Not critical - navigation will handle it
       logger.debug('Could not execute media stop script', { error: error.message });
     }
   }
 
   /**
-   * Execute a JavaScript snippet in the browser.
-   *
-   * @param {string} script - The JavaScript to execute
-   * @throws {Error} If script execution fails
+   * Execute a JavaScript snippet in the browser (Playwright mode only)
    */
   async executeScript(script) {
+    if (!this.usePlaywright || !this.page) {
+      logger.warn('Script execution not available in spawn mode');
+      return null;
+    }
+
     logger.info('Executing browser script', { script: script.substring(0, 100) });
 
     try {
       await this._ensureBrowserReady();
-
-      // Execute script via Playwright
       const result = await this.page.evaluate((code) => {
-        // Use Function constructor to execute arbitrary code
         return new Function(code)();
       }, script);
-
       logger.debug('Script executed successfully');
       return result;
     } catch (error) {
@@ -312,9 +316,14 @@ class BrowserController {
   }
 
   /**
-   * Pause video playback.
+   * Pause video playback (Playwright mode only)
    */
   async pause() {
+    if (!this.usePlaywright || !this.page) {
+      logger.warn('Pause not available in spawn mode');
+      return;
+    }
+
     try {
       await this._ensureBrowserReady();
       await this.page.evaluate(() => {
@@ -328,9 +337,14 @@ class BrowserController {
   }
 
   /**
-   * Resume video playback.
+   * Resume video playback (Playwright mode only)
    */
   async resume() {
+    if (!this.usePlaywright || !this.page) {
+      logger.warn('Resume not available in spawn mode');
+      return;
+    }
+
     try {
       await this._ensureBrowserReady();
       await this.page.evaluate(() => {
@@ -343,35 +357,19 @@ class BrowserController {
     }
   }
 
-  /**
-   * Get the current URL.
-   * @returns {string} The current URL
-   */
   getCurrentUrl() {
     return this.currentUrl;
   }
 
-  /**
-   * Force restart the browser.
-   * Use sparingly - this will close and reopen the browser.
-   *
-   * @param {string} url - The URL to open after restart
-   */
   async forceRestartBrowser(url = STANDBY_URL) {
     logger.info('Force restarting browser', { url });
 
     try {
-      // Close existing browser
       await this._closeBrowser();
-
-      // Wait for cleanup
       await this._delay(500);
-
-      // Reinitialize
       this.isInitialized = false;
       await this.initialize();
 
-      // Navigate to requested URL
       if (url !== STANDBY_URL) {
         await this.navigateTo(url);
       }
@@ -383,52 +381,47 @@ class BrowserController {
     }
   }
 
-  /**
-   * Close the browser gracefully.
-   */
   async _closeBrowser() {
     try {
       if (this.page) {
         await this.page.close().catch(() => {});
         this.page = null;
       }
-      if (this.context) {
-        await this.context.close().catch(() => {});
-        this.context = null;
-      }
-      if (this.browser) {
-        await this.browser.close().catch(() => {});
-        this.browser = null;
+      if (this.playwrightContext) {
+        await this.playwrightContext.close().catch(() => {});
+        this.playwrightContext = null;
       }
     } catch (error) {
-      logger.debug('Error closing browser', { error: error.message });
+      logger.debug('Error closing Playwright', { error: error.message });
     }
+
+    await this._killBrowserDirect();
   }
 
-  /**
-   * Ensure browser is ready for operations.
-   */
   async _ensureBrowserReady() {
-    if (!this.isInitialized || !this.page || this.page.isClosed()) {
-      logger.warn('Browser not ready, reinitializing');
-      this.isInitialized = false;
-      await this.initialize();
+    if (this.usePlaywright) {
+      if (!this.isInitialized || !this.page || this.page.isClosed()) {
+        logger.warn('Browser not ready, reinitializing');
+        this.isInitialized = false;
+        await this.initialize();
+      }
+    } else {
+      if (!this.isInitialized || !this.browserProcess || this.browserProcess.killed) {
+        logger.warn('Browser not ready, reinitializing');
+        this.isInitialized = false;
+        await this.initialize();
+      }
     }
   }
 
-  /**
-   * Recover from a crash or error state.
-   */
   async _recoverFromCrash() {
     logger.info('Attempting crash recovery');
 
     try {
       await this._closeBrowser();
       await this._delay(1000);
-
       this.isInitialized = false;
       await this.initialize();
-
       logger.info('Crash recovery successful');
     } catch (error) {
       logger.error('Crash recovery failed', { error: error.message });
@@ -436,32 +429,15 @@ class BrowserController {
     }
   }
 
-  /**
-   * Check if a string contains shell metacharacters.
-   * Defense in depth against injection attacks.
-   *
-   * @param {string} str - String to check
-   * @returns {boolean} True if contains dangerous characters
-   * @private
-   */
   _containsShellMetacharacters(str) {
     const dangerousChars = /[`$\\;|&><\n\r]/;
     return dangerousChars.test(str);
   }
 
-  /**
-   * Promise-based delay helper.
-   *
-   * @param {number} ms - Milliseconds to wait
-   * @private
-   */
   _delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /**
-   * Cleanup on shutdown.
-   */
   async shutdown() {
     logger.info('Shutting down browser controller');
     await this._closeBrowser();
