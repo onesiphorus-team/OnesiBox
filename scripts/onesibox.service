@@ -7,7 +7,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=onesibox
+User=debian
 ExecStart=/usr/bin/node /opt/onesibox/src/main.js
 Restart=always
 RestartSec=10
@@ -23,7 +23,7 @@ WorkingDirectory=/opt/onesibox
 # ha bisogno di sudo per comandi di reboot/restart (via /etc/sudoers.d/onesibox)
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/onesibox /var/log/onesibox
+ReadWritePaths=/opt/onesibox /var/log/onesibox /home/debian
 PrivateTmp=true
 
 # Sensitive configuration via environment variables (recommended for production)
