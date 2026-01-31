@@ -5,12 +5,21 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
+User=onesibox
 ExecStart=/usr/bin/node /opt/onesibox/src/main.js
 Restart=always
 RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
 Environment=NODE_ENV=production
 WorkingDirectory=/opt/onesibox
+
+# Sicurezza
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/onesibox /var/log/onesibox
+PrivateTmp=true
 
 # Sensitive configuration via environment variables (recommended for production)
 # Uncomment and set these instead of storing in config.json:

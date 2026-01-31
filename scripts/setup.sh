@@ -27,7 +27,7 @@ echo "Node.js version: $(node --version)"
 echo ""
 echo "Step 3: Installing Chromium and display dependencies..."
 apt install -y \
-  chromium-browser \
+  chromium \
   xserver-xorg \
   x11-xserver-utils \
   xinit \

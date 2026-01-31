@@ -336,7 +336,7 @@ install_system_packages() {
     # Chromium e display
     print_info "Installazione Chromium e dipendenze display..."
     apt install -y -qq \
-        chromium-browser \
+        chromium \
         xserver-xorg \
         x11-xserver-utils \
         xinit \
@@ -434,6 +434,12 @@ install_application() {
 
     # Imposta permessi
     chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+
+    # Rendi eseguibili gli script
+    chmod +x "$INSTALL_DIR/scripts/"*.sh 2>/dev/null || true
+    chmod +x "$INSTALL_DIR/start-kiosk.sh" 2>/dev/null || true
+    chmod +x "$INSTALL_DIR/reconfigure.sh" 2>/dev/null || true
+    print_success "Script resi eseguibili"
 }
 
 # ============================================================================
@@ -548,7 +554,7 @@ unclutter -idle 3 &
 sleep 5
 
 # Avvia Chromium in modalità kiosk
-exec chromium-browser \
+exec chromium \
   --kiosk \
   --noerrdialogs \
   --disable-infobars \
@@ -577,6 +583,20 @@ EOF
 
     chown -R "$SERVICE_USER:$SERVICE_USER" "$USER_HOME/.config"
     chown "$SERVICE_USER:$SERVICE_USER" "$USER_HOME/.bash_profile"
+
+    # Autostart per desktop environment (lightdm, gdm, ecc.)
+    print_info "Configurazione autostart per desktop environment..."
+    cat > /etc/xdg/autostart/onesibox-kiosk.desktop << EOF
+[Desktop Entry]
+Type=Application
+Name=OnesiBox Kiosk
+Comment=OnesiBox Chromium Kiosk Mode
+Exec=$INSTALL_DIR/scripts/start-kiosk.sh http://localhost:3000
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+EOF
+    print_success "Autostart desktop configurato"
 
     print_success "Modalità kiosk configurata"
 }

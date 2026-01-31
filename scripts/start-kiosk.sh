@@ -10,7 +10,7 @@ xset -dpms 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 
 # Start Chromium in kiosk mode
-exec chromium-browser \
+exec chromium \
   --kiosk \
   --noerrdialogs \
   --disable-infobars \

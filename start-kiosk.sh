@@ -6,7 +6,7 @@ xset -dpms
 
 unclutter -idle 0.5 -root &
 
-chromium-browser \
+chromium \
       --kiosk \
       --noerrdialogs \
       --disable-infobars \
