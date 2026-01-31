@@ -213,10 +213,62 @@ async function handleApiSystemInfo(req, res) {
   }
 }
 
+/**
+ * Proxy endpoint for JW CDN media API.
+ * Avoids CORS/CSP issues by fetching server-side.
+ */
+async function handleJwMediaProxy(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const lang = url.searchParams.get('lang');
+  const mediaId = url.searchParams.get('mediaId');
+
+  if (!lang || !mediaId) {
+    writeSecureResponse(res, 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing lang or mediaId parameter' }));
+    return;
+  }
+
+  // Validate parameters (prevent injection)
+  if (!/^[A-Z]{1,3}$/i.test(lang) || !/^[\w-]+$/.test(mediaId)) {
+    writeSecureResponse(res, 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid parameters' }));
+    return;
+  }
+
+  const apiUrl = `https://b.jw-cdn.org/apis/mediator/v1/media-items/${lang.toUpperCase()}/${mediaId}`;
+
+  try {
+    const https = require('https');
+    const fetchPromise = new Promise((resolve, reject) => {
+      https.get(apiUrl, (response) => {
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => {
+          if (response.statusCode === 200) {
+            resolve(data);
+          } else {
+            reject(new Error(`API returned ${response.statusCode}`));
+          }
+        });
+      }).on('error', reject);
+    });
+
+    const data = await fetchPromise;
+    writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
+    res.end(data);
+  } catch (error) {
+    logger.warn('JW media proxy failed', { error: error.message, lang, mediaId });
+    writeSecureResponse(res, 502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to fetch media data' }));
+  }
+}
+
 function createServer() {
   return http.createServer((req, res) => {
+    const urlPath = new URL(req.url, 'http://localhost').pathname;
+
     // API endpoints require authentication if LOCAL_API_KEY is set
-    if (req.url === '/api/status' || req.url === '/api/system-info') {
+    if (urlPath === '/api/status' || urlPath === '/api/system-info') {
       if (!isApiAuthenticated(req)) {
         logger.warn('Unauthorized API request', {
           url: req.url,
@@ -226,11 +278,14 @@ function createServer() {
         return;
       }
 
-      if (req.url === '/api/status') {
+      if (urlPath === '/api/status') {
         handleApiStatus(req, res);
       } else {
         handleApiSystemInfo(req, res);
       }
+    } else if (urlPath === '/api/jw-media') {
+      // JW media proxy - no auth required (local use only)
+      handleJwMediaProxy(req, res);
     } else {
       // Static files don't require authentication
       serveStatic(req, res);

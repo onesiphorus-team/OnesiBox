@@ -94,17 +94,19 @@
     }
 
     /**
-     * Fetch media data from JW CDN API
+     * Fetch media data via local proxy (avoids CORS/CSP issues)
      */
     async function fetchMediaData(lang, mediaId) {
       const apiLang = LANG_MAP[lang] || lang.toUpperCase();
-      const apiUrl = `https://b.jw-cdn.org/apis/mediator/v1/media-items/${apiLang}/${mediaId}`;
+      // Use local proxy to avoid CORS/CSP issues
+      const proxyUrl = `/api/jw-media?lang=${apiLang}&mediaId=${encodeURIComponent(mediaId)}`;
 
-      console.log('Fetching media from:', apiUrl);
+      console.log('Fetching media via proxy:', proxyUrl);
 
-      const response = await fetch(apiUrl);
+      const response = await fetch(proxyUrl);
       if (!response.ok) {
-        throw new Error(`Media not found (${response.status})`);
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || `Media not found (${response.status})`);
       }
 
       const data = await response.json();
