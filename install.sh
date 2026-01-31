@@ -184,10 +184,74 @@ check_prerequisites() {
 }
 
 # ============================================================================
+# Verifica installazione esistente
+# ============================================================================
+
+check_existing_installation() {
+    KEEP_CONFIG=false
+
+    if [ -f "$CONFIG_FILE" ]; then
+        print_step "Installazione Esistente Rilevata"
+
+        # Installa jq se non disponibile (serve per leggere il config JSON)
+        if ! command -v jq &> /dev/null; then
+            print_info "Installazione jq per leggere la configurazione..."
+            apt install -y -qq jq
+        fi
+
+        print_info "Trovato file di configurazione esistente: $CONFIG_FILE"
+        echo ""
+
+        # Mostra configurazione attuale (senza token completo)
+        if command -v jq &> /dev/null; then
+            EXISTING_NAME=$(jq -r '.device_name // "N/A"' "$CONFIG_FILE" 2>/dev/null)
+            EXISTING_SERVER=$(jq -r '.server_url // "N/A"' "$CONFIG_FILE" 2>/dev/null)
+            EXISTING_ID=$(jq -r '.appliance_id // "N/A"' "$CONFIG_FILE" 2>/dev/null)
+            EXISTING_TOKEN=$(jq -r '.appliance_token // ""' "$CONFIG_FILE" 2>/dev/null)
+
+            echo -e "  ${BOLD}Configurazione attuale:${NC}"
+            echo -e "  • Nome:         ${CYAN}$EXISTING_NAME${NC}"
+            echo -e "  • Server:       ${CYAN}$EXISTING_SERVER${NC}"
+            echo -e "  • Appliance ID: ${CYAN}$EXISTING_ID${NC}"
+            echo -e "  • Token:        ${CYAN}****${EXISTING_TOKEN: -4}${NC}"
+            echo ""
+        fi
+
+        if confirm "Vuoi mantenere la configurazione esistente?" "y"; then
+            KEEP_CONFIG=true
+            print_success "Configurazione esistente mantenuta"
+
+            # Carica i valori esistenti
+            if command -v jq &> /dev/null; then
+                DEVICE_NAME=$(jq -r '.device_name // "OnesiBox"' "$CONFIG_FILE")
+                SERVER_URL=$(jq -r '.server_url // ""' "$CONFIG_FILE")
+                APPLIANCE_ID=$(jq -r '.appliance_id // ""' "$CONFIG_FILE")
+                APPLIANCE_TOKEN=$(jq -r '.appliance_token // ""' "$CONFIG_FILE")
+                POLLING_INTERVAL=$(jq -r '.polling_interval_seconds // 5' "$CONFIG_FILE")
+                HEARTBEAT_INTERVAL=$(jq -r '.heartbeat_interval_seconds // 30' "$CONFIG_FILE")
+                DEFAULT_VOLUME=$(jq -r '.default_volume // 80' "$CONFIG_FILE")
+            else
+                print_warning "jq non installato, impossibile leggere configurazione"
+                KEEP_CONFIG=false
+            fi
+        else
+            print_info "Verrà richiesta una nuova configurazione"
+        fi
+    fi
+}
+
+# ============================================================================
 # Raccolta configurazione (interattivo)
 # ============================================================================
 
 collect_configuration() {
+    # Se la configurazione esistente è stata mantenuta, salta
+    if [ "$KEEP_CONFIG" = true ]; then
+        print_step "Configurazione"
+        print_success "Utilizzo configurazione esistente"
+        return
+    fi
+
     print_step "Configurazione OnesiBox"
 
     echo -e "${CYAN}Per completare l'installazione, sono necessarie alcune informazioni.${NC}"
@@ -679,6 +743,7 @@ main() {
     print_banner
 
     check_prerequisites
+    check_existing_installation
     collect_configuration
     install_system_packages
     setup_user_and_directories
