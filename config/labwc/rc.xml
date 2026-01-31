@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!-- OnesiBox labwc configuration -->
+<labwc_config>
+  <keyboard>
+    <!-- Emergency exit: Alt+F4 closes window -->
+    <keybind key="A-F4">
+      <action name="Close"/>
+    </keybind>
+    <!-- Alt+Tab switches windows -->
+    <keybind key="A-Tab">
+      <action name="NextWindow"/>
+    </keybind>
+    <!-- Super+Enter opens terminal (for debugging) -->
+    <keybind key="W-Return">
+      <action name="Execute">
+        <command>lxterminal</command>
+      </action>
+    </keybind>
+    <!-- Super+R restarts OnesiBox service (for debugging) -->
+    <keybind key="W-r">
+      <action name="Execute">
+        <command>sudo systemctl restart onesibox</command>
+      </action>
+    </keybind>
+  </keyboard>
+
+  <libinput>
+    <device category="default">
+      <naturalScroll>no</naturalScroll>
+      <accelProfile>flat</accelProfile>
+    </device>
+  </libinput>
+
+  <!-- Focus follows mouse for easier navigation -->
+  <focus>
+    <followMouse>yes</followMouse>
+  </focus>
+</labwc_config>

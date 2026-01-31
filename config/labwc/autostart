@@ -1,0 +1,11 @@
+# OnesiBox labwc autostart configuration
+# This file is executed when labwc starts
+
+# Start the OnesiBox kiosk script (waits for backend and maintains session)
+/opt/onesibox/scripts/start-kiosk.sh http://localhost:3000 &
+
+# Optional: Start wf-panel-pi for Raspberry Pi (comment out for pure kiosk)
+# wf-panel-pi &
+
+# Optional: Desktop background with pcmanfm (comment out for pure kiosk)
+# pcmanfm --desktop &

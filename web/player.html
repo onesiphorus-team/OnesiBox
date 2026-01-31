@@ -5,281 +5,67 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OnesiBox Player</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    html, body {
-      width: 100%;
-      height: 100%;
-      background: #000;
-      overflow: hidden;
-    }
-    .player-container {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    .loading {
-      color: #fff;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 24px;
-      text-align: center;
-    }
-    .error {
-      color: #ff6b6b;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 20px;
-      text-align: center;
-      padding: 20px;
-    }
-    .spinner {
-      width: 50px;
-      height: 50px;
-      border: 4px solid #333;
-      border-top: 4px solid #fff;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 20px;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    .container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .loading, .error { color: #fff; font-family: sans-serif; font-size: 24px; text-align: center; }
+    .error { color: #ff6b6b; }
+    .spinner { width: 50px; height: 50px; border: 4px solid #333; border-top: 4px solid #fff; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div class="player-container" id="container">
-    <div class="loading">
-      <div class="spinner"></div>
-      <div>Caricamento video...</div>
-    </div>
+  <div class="container" id="container">
+    <div class="loading"><div class="spinner"></div><div>Caricamento...</div></div>
   </div>
 
   <script>
-    // Language code mapping: URL codes -> JW API codes
     const LANG_MAP = {
       'it': 'I', 'en': 'E', 'es': 'S', 'pt': 'T', 'fr': 'F',
-      'de': 'X', 'ru': 'U', 'ja': 'J', 'ko': 'KO', 'zh': 'CHS',
-      'pl': 'P', 'nl': 'O', 'sv': 'Z', 'fi': 'FI', 'da': 'D',
-      'no': 'N', 'cs': 'B', 'sk': 'V', 'hu': 'H', 'ro': 'M',
-      'el': 'G', 'tr': 'TK', 'ar': 'A', 'he': 'HE', 'uk': 'K'
+      'de': 'X', 'ru': 'U', 'ja': 'J', 'ko': 'KO', 'zh': 'CHS'
     };
 
-    /**
-     * Parse JW.org URL to extract language and media ID
-     */
     function parseJwUrl(url) {
-      // Pattern: ...#LANG/mediaitems/CATEGORY/MEDIA_ID
       const hashMatch = url.match(/#([a-z]{2,3})\/mediaitems\/[^\/]+\/([^\/?]+)/i);
-      if (hashMatch) {
-        return { lang: hashMatch[1].toLowerCase(), mediaId: hashMatch[2] };
-      }
-
-      // Alternative path format
+      if (hashMatch) return { lang: hashMatch[1].toLowerCase(), mediaId: hashMatch[2] };
       const pathMatch = url.match(/\/([a-z]{2,3})\/.*\/([a-zA-Z0-9_-]+_VIDEO)/i);
-      if (pathMatch) {
-        return { lang: pathMatch[1].toLowerCase(), mediaId: pathMatch[2] };
-      }
-
+      if (pathMatch) return { lang: pathMatch[1].toLowerCase(), mediaId: pathMatch[2] };
       return null;
     }
 
-    /**
-     * Fetch media data from JW CDN API
-     */
     async function fetchMediaData(lang, mediaId) {
       const apiLang = LANG_MAP[lang] || lang.toUpperCase();
-      const apiUrl = `https://b.jw-cdn.org/apis/mediator/v1/media-items/${apiLang}/${mediaId}`;
-
-      console.log('Fetching media from:', apiUrl);
-
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        throw new Error(`Media not found (${response.status})`);
-      }
-
+      const response = await fetch(`/api/jw-media?lang=${apiLang}&mediaId=${encodeURIComponent(mediaId)}`);
+      if (!response.ok) throw new Error('Media non trovato');
       const data = await response.json();
-      if (!data.media || data.media.length === 0) {
-        throw new Error('No media found for this ID');
-      }
+      if (!data.media || !data.media[0]) throw new Error('Nessun media');
       return data.media[0];
     }
 
-    /**
-     * Get best quality video URL
-     */
     function getBestVideoUrl(media) {
-      const videos = media.files.filter(f => f.progressiveDownloadURL);
-      if (videos.length === 0) {
-        throw new Error('No video files available');
-      }
-
-      // Sort by quality (label contains resolution)
-      videos.sort((a, b) => {
-        const resA = parseInt(a.label) || 0;
-        const resB = parseInt(b.label) || 0;
-        return resB - resA;
-      });
-
+      const videos = (media.files || []).filter(f => f.progressiveDownloadURL);
+      if (!videos.length) throw new Error('Nessun video disponibile');
+      videos.sort((a, b) => (parseInt(b.label) || 0) - (parseInt(a.label) || 0));
       return videos[0].progressiveDownloadURL;
     }
 
-    /**
-     * Display video player
-     */
-    function displayVideo(videoUrl, title) {
-      const container = document.getElementById('container');
-
-      console.log('Creating video element with URL:', videoUrl);
-
-      const video = document.createElement('video');
-      video.autoplay = true;
-      video.muted = true; // Required for autoplay to work
-      video.controls = false; // Kiosk mode - no controls
-      video.playsInline = true;
-      video.src = videoUrl;
-
-      // Unmute after playback starts (autoplay requires muted)
-      video.addEventListener('playing', () => {
-        console.log('Video playing, unmuting...');
-        video.muted = false;
-      }, { once: true });
-
-      // Fullscreen on click
-      video.addEventListener('click', () => {
-        if (document.fullscreenElement) {
-          document.exitFullscreen();
-        } else {
-          video.requestFullscreen();
-        }
-      });
-
-      // Auto-fullscreen on play
-      video.addEventListener('play', () => {
-        console.log('Video play event');
-        if (!document.fullscreenElement) {
-          video.requestFullscreen().catch(() => {});
-        }
-      });
-
-      // Notify parent when video ends
-      video.addEventListener('ended', () => {
-        console.log('Video ended');
-        // Navigate back to standby
-        window.location.href = '/';
-      });
-
-      video.addEventListener('error', (e) => {
-        console.error('Video playback error:', e);
-        const errorCode = video.error ? video.error.code : 'unknown';
-        const errorMsg = video.error ? video.error.message : 'unknown';
-        showError(`Errore video: ${errorCode} - ${errorMsg}`);
-      });
-
-      video.addEventListener('loadstart', () => console.log('Video loadstart'));
-      video.addEventListener('loadeddata', () => console.log('Video loadeddata'));
-      video.addEventListener('canplay', () => {
-        console.log('Video canplay - attempting to play');
-        forcePlay(video);
-      });
-
-      container.innerHTML = '';
-      container.appendChild(video);
-
-      // Request fullscreen immediately
-      requestFullscreen(video);
+    function showError(msg) {
+      document.getElementById('container').innerHTML = `<div class="error">${msg}</div>`;
+      setTimeout(() => window.location.href = '/', 5000);
     }
 
-    /**
-     * Force video to play with multiple attempts
-     */
-    async function forcePlay(video) {
-      try {
-        await video.play();
-        console.log('Autoplay succeeded');
-      } catch (err) {
-        console.warn('Autoplay blocked, trying muted:', err.message);
-        video.muted = true;
-        try {
-          await video.play();
-          console.log('Muted autoplay succeeded, will unmute on interaction');
-          // Add click handler to unmute
-          document.body.addEventListener('click', () => {
-            video.muted = false;
-            console.log('Unmuted after user interaction');
-          }, { once: true });
-        } catch (err2) {
-          console.error('Even muted autoplay failed:', err2);
-          showError(`Impossibile avviare il video: ${err2.message}`);
-        }
-      }
-    }
-
-    /**
-     * Request fullscreen with fallbacks
-     */
-    function requestFullscreen(element) {
-      const methods = [
-        'requestFullscreen',
-        'webkitRequestFullscreen',
-        'mozRequestFullScreen',
-        'msRequestFullscreen'
-      ];
-
-      for (const method of methods) {
-        if (element[method]) {
-          element[method]().catch(() => {
-            console.log('Fullscreen request failed, trying document');
-            document.documentElement[method]?.().catch(() => {});
-          });
-          return;
-        }
-      }
-    }
-
-    /**
-     * Show error message
-     */
-    function showError(message) {
-      const container = document.getElementById('container');
-      container.innerHTML = `<div class="error">${message}</div>`;
-
-      // Return to standby after 5 seconds
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 5000);
-    }
-
-    /**
-     * Main initialization
-     */
     async function init() {
       const params = new URLSearchParams(window.location.search);
       const url = params.get('url');
-      const autoplay = params.get('autoplay') !== 'false';
 
-      if (!url) {
-        showError('Nessun URL specificato');
-        return;
-      }
+      if (!url) { showError('Nessun URL'); return; }
 
-      console.log('Loading video from:', url);
-
-      // Check if it's a JW.org URL
       const parsed = parseJwUrl(url);
       if (!parsed) {
-        // Not a JW URL, try direct playback
-        if (url.match(/\.(mp4|webm|m3u8)(\?|$)/i)) {
-          displayVideo(url, 'Video');
+        // Direct video URL
+        if (url.match(/\.(mp4|webm)(\?|$)/i)) {
+          playVideo(url);
         } else {
           showError('URL non supportato');
         }
@@ -287,16 +73,39 @@
       }
 
       try {
-        const mediaData = await fetchMediaData(parsed.lang, parsed.mediaId);
-        const videoUrl = getBestVideoUrl(mediaData);
-        displayVideo(videoUrl, mediaData.title);
-      } catch (error) {
-        console.error('Error loading video:', error);
-        showError(`Errore: ${error.message}`);
+        const media = await fetchMediaData(parsed.lang, parsed.mediaId);
+        const videoUrl = getBestVideoUrl(media);
+        console.log('Video URL:', videoUrl);
+        playVideo(videoUrl);
+      } catch (err) {
+        console.error(err);
+        showError('Errore: ' + err.message);
       }
     }
 
-    // Start when DOM is ready
+    function playVideo(videoUrl) {
+      // Use innerHTML like the working PoC
+      document.getElementById('container').innerHTML = `
+        <video id="player" autoplay controls style="width:100%;height:100%">
+          <source src="${videoUrl}" type="video/mp4">
+        </video>
+      `;
+
+      const video = document.getElementById('player');
+
+      video.onended = () => window.location.href = '/';
+
+      video.onerror = (e) => {
+        console.error('Video error:', video.error);
+        showError('Errore video: ' + (video.error ? video.error.code : 'sconosciuto'));
+      };
+
+      // Try fullscreen
+      video.onplay = () => {
+        video.requestFullscreen && video.requestFullscreen().catch(() => {});
+      };
+    }
+
     document.addEventListener('DOMContentLoaded', init);
   </script>
 </body>

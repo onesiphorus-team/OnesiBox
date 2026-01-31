@@ -1,0 +1,15 @@
+# OnesiBox labwc environment configuration
+# Environment variables for Wayland session
+
+# Enable Wayland for Chromium/Electron apps
+ELECTRON_OZONE_PLATFORM_HINT=wayland
+
+# XDG runtime directory (usually set by login manager)
+# XDG_RUNTIME_DIR=/run/user/1000
+
+# Disable hardware cursors if having issues
+# WLR_NO_HARDWARE_CURSORS=1
+
+# Force software rendering if GPU issues
+# WLR_RENDERER=pixman
+# LIBGL_ALWAYS_SOFTWARE=1
