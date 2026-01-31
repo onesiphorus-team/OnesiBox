@@ -397,16 +397,18 @@ install_system_packages() {
     apt install -y -qq git
     print_success "Git installato"
 
-    # Chromium e display
+    # Chromium e display (supporto sia Wayland che X11)
     print_info "Installazione Chromium e dipendenze display..."
     apt install -y -qq \
         chromium \
+        cage \
         xserver-xorg \
         x11-xserver-utils \
         xinit \
         openbox \
-        xdotool
-    print_success "Chromium e X11 installati"
+        xdotool \
+        wtype
+    print_success "Chromium, Cage (Wayland) e X11 installati"
 
     # Audio
     print_info "Installazione strumenti audio..."
@@ -596,76 +598,139 @@ EOF
 }
 
 # ============================================================================
-# Configurazione auto-login e kiosk mode
+# Configurazione kiosk mode (gestito interamente da systemd)
 # ============================================================================
 
-setup_autologin_and_kiosk() {
-    print_step "Configurazione Auto-Login e Modalità Kiosk"
+setup_kiosk_service() {
+    print_step "Configurazione Modalità Kiosk"
 
-    # Auto-login su TTY1
-    print_info "Configurazione auto-login..."
-    mkdir -p /etc/systemd/system/getty@tty1.service.d
-    cat > /etc/systemd/system/getty@tty1.service.d/override.conf << EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $SERVICE_USER --noclear %I \$TERM
-EOF
-    print_success "Auto-login configurato"
-
-    # Configurazione X autostart
-    print_info "Configurazione avvio automatico X..."
     USER_HOME=$(eval echo ~$SERVICE_USER)
 
-    mkdir -p "$USER_HOME/.config/openbox"
-
-    # Script di avvio kiosk
-    cat > "$USER_HOME/.config/openbox/autostart" << 'EOF'
+    # Crea script di avvio kiosk che funziona sia con X11 che Wayland
+    print_info "Creazione script kiosk universale..."
+    cat > "$INSTALL_DIR/scripts/kiosk-launcher.sh" << 'KIOSKEOF'
 #!/bin/bash
+# OnesiBox Kiosk Launcher - Funziona con X11 e Wayland
+# Gestito da systemd, non richiede login utente
 
-# Disabilita screen blanking
+URL="${1:-http://localhost:3000}"
+KIOSK_USER="${2:-onesibox}"
+
+# Chromium flags comuni
+CHROMIUM_FLAGS=(
+    --kiosk
+    --noerrdialogs
+    --disable-infobars
+    --disable-session-crashed-bubble
+    --disable-restore-session-state
+    --autoplay-policy=no-user-gesture-required
+    --use-fake-ui-for-media-stream
+    --enable-features=WebRTCPipeWireCapturer
+    --disable-features=TranslateUI
+    --check-for-update-interval=31536000
+    --disable-component-update
+    --disable-background-networking
+    --disable-sync
+    --disable-default-apps
+    --no-first-run
+    --start-fullscreen
+    --disable-pinch
+    --overscroll-history-navigation=0
+)
+
+# Aspetta che il server Node.js sia pronto
+echo "Attendo che OnesiBox sia pronto..."
+for i in {1..30}; do
+    if curl -s "$URL/api/status" > /dev/null 2>&1; then
+        echo "OnesiBox pronto!"
+        break
+    fi
+    sleep 1
+done
+
+# Prova prima con cage (Wayland kiosk compositor) - piu' affidabile
+if command -v cage &> /dev/null; then
+    echo "Avvio kiosk con Cage (Wayland)..."
+    export WLR_LIBINPUT_NO_DEVICES=1
+    exec cage -s -- chromium "${CHROMIUM_FLAGS[@]}" "$URL"
+fi
+
+# Fallback: X11 con xinit
+if command -v xinit &> /dev/null; then
+    echo "Avvio kiosk con X11..."
+
+    # Crea xinitrc temporaneo
+    XINITRC=$(mktemp)
+    cat > "$XINITRC" << XINIT
+#!/bin/bash
 xset s off
 xset -dpms
 xset s noblank
+unclutter -idle 1 -root &
+exec chromium ${CHROMIUM_FLAGS[@]} "$URL"
+XINIT
+    chmod +x "$XINITRC"
 
-# Nascondi cursore dopo 3 secondi di inattività
-unclutter -idle 3 &
+    exec xinit "$XINITRC" -- :0 vt1 -keeptty -nolisten tcp
+fi
 
-# Aspetta che il server Node.js sia pronto
-sleep 5
+echo "ERRORE: Nessun display server disponibile (cage o xinit)"
+exit 1
+KIOSKEOF
 
-# Avvia Chromium in modalità kiosk
-exec chromium \
-  --kiosk \
-  --noerrdialogs \
-  --disable-infobars \
-  --disable-session-crashed-bubble \
-  --disable-restore-session-state \
-  --autoplay-policy=no-user-gesture-required \
-  --use-fake-ui-for-media-stream \
-  --enable-features=WebRTCPipeWireCapturer \
-  --disable-features=TranslateUI \
-  --check-for-update-interval=31536000 \
-  --disable-component-update \
-  --disable-background-networking \
-  --disable-sync \
-  --disable-default-apps \
-  --no-first-run \
-  --start-fullscreen \
-  "http://localhost:3000"
+    chmod +x "$INSTALL_DIR/scripts/kiosk-launcher.sh"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts/kiosk-launcher.sh"
+    print_success "Script kiosk creato"
+
+    # Crea servizio systemd per il kiosk
+    print_info "Creazione servizio kiosk..."
+    cat > /etc/systemd/system/onesibox-kiosk.service << EOF
+[Unit]
+Description=OnesiBox Kiosk Display
+After=onesibox.service
+Wants=onesibox.service
+ConditionPathExists=$INSTALL_DIR/scripts/kiosk-launcher.sh
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+ExecStart=$INSTALL_DIR/scripts/kiosk-launcher.sh http://localhost:3000 $SERVICE_USER
+Restart=always
+RestartSec=5
+
+# Permetti accesso al display
+SupplementaryGroups=video audio input render
+
+[Install]
+WantedBy=graphical.target
 EOF
 
-    chmod +x "$USER_HOME/.config/openbox/autostart"
+    print_success "Servizio kiosk creato"
 
-    # Aggiungi startx al login
-    if ! grep -q "startx" "$USER_HOME/.bash_profile" 2>/dev/null; then
-        echo '[[ -z $DISPLAY && $XDG_VTNR -eq 1 ]] && startx' >> "$USER_HOME/.bash_profile"
-    fi
+    # Disabilita getty su tty1 (il kiosk lo usa)
+    print_info "Configurazione TTY1 per kiosk..."
+    systemctl disable getty@tty1.service 2>/dev/null || true
+    systemctl stop getty@tty1.service 2>/dev/null || true
+    print_success "TTY1 configurato"
 
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$USER_HOME/.config"
-    chown "$SERVICE_USER:$SERVICE_USER" "$USER_HOME/.bash_profile"
+    # Abilita servizio kiosk
+    systemctl daemon-reload
+    systemctl enable onesibox-kiosk.service
+    print_success "Servizio kiosk abilitato"
 
-    # Autostart per desktop environment (lightdm, gdm, ecc.)
-    print_info "Configurazione autostart per desktop environment..."
+    # Configura anche XDG autostart come fallback per desktop environment
+    print_info "Configurazione fallback per desktop environment..."
+    mkdir -p /etc/xdg/autostart
     cat > /etc/xdg/autostart/onesibox-kiosk.desktop << EOF
 [Desktop Entry]
 Type=Application
@@ -675,8 +740,9 @@ Exec=$INSTALL_DIR/scripts/start-kiosk.sh http://localhost:3000
 Terminal=false
 X-GNOME-Autostart-enabled=true
 X-GNOME-Autostart-Delay=5
+OnlyShowIn=GNOME;XFCE;LXDE;MATE;Cinnamon;
 EOF
-    print_success "Autostart desktop configurato"
+    print_success "Fallback desktop configurato"
 
     print_success "Modalità kiosk configurata"
 }
@@ -686,21 +752,33 @@ EOF
 # ============================================================================
 
 start_and_test() {
-    print_step "Avvio e Test del Servizio"
+    print_step "Avvio e Test dei Servizi"
 
-    print_info "Avvio servizio onesibox..."
+    print_info "Avvio servizio onesibox (backend)..."
     systemctl start onesibox
 
     # Aspetta che il servizio sia attivo
     sleep 3
 
     if systemctl is-active --quiet onesibox; then
-        print_success "Servizio avviato correttamente"
+        print_success "Servizio backend avviato correttamente"
 
         # Test endpoint locale
         print_info "Test endpoint locale..."
         if curl -sSf "http://localhost:3000/api/status" > /dev/null 2>&1; then
             print_success "Server HTTP locale attivo"
+
+            # Avvia il kiosk solo dopo che il backend e' pronto
+            print_info "Avvio servizio kiosk..."
+            systemctl start onesibox-kiosk || true
+            sleep 2
+
+            if systemctl is-active --quiet onesibox-kiosk; then
+                print_success "Servizio kiosk avviato correttamente"
+            else
+                print_warning "Kiosk non avviato (verra' avviato al prossimo riavvio)"
+                print_info "Per avviare manualmente: sudo systemctl start onesibox-kiosk"
+            fi
         else
             print_warning "Server HTTP locale non ancora attivo (potrebbe essere in avvio)"
         fi
@@ -731,9 +809,11 @@ print_summary() {
     echo -e "  • Utente:            ${CYAN}$SERVICE_USER${NC}"
 
     echo -e "\n${BOLD}Comandi utili:${NC}"
-    echo -e "  • Stato servizio:    ${YELLOW}sudo systemctl status onesibox${NC}"
+    echo -e "  • Stato backend:     ${YELLOW}sudo systemctl status onesibox${NC}"
+    echo -e "  • Stato kiosk:       ${YELLOW}sudo systemctl status onesibox-kiosk${NC}"
     echo -e "  • Log in tempo reale:${YELLOW}journalctl -u onesibox -f${NC}"
-    echo -e "  • Riavvia servizio:  ${YELLOW}sudo systemctl restart onesibox${NC}"
+    echo -e "  • Riavvia backend:   ${YELLOW}sudo systemctl restart onesibox${NC}"
+    echo -e "  • Riavvia kiosk:     ${YELLOW}sudo systemctl restart onesibox-kiosk${NC}"
     echo -e "  • Test locale:       ${YELLOW}curl http://localhost:3000/api/status${NC}"
 
     echo -e "\n${BOLD}Prossimi passi:${NC}"
@@ -766,7 +846,7 @@ main() {
     install_application
     create_configuration
     setup_systemd_service
-    setup_autologin_and_kiosk
+    setup_kiosk_service
     start_and_test
     print_summary
 }
