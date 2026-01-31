@@ -1,5 +1,8 @@
 const { chromium } = require('playwright');
 const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const logger = require('../logging/logger');
 const { isUrlAllowed, isZoomUrl } = require('../commands/validator');
 
@@ -113,6 +116,19 @@ class BrowserController {
 
       // Find system Chromium or use Playwright's bundled browser
       const chromiumPath = findChromiumPath();
+
+      // Create persistent user data directory with Crash Reports folder
+      // This is required for system Chromium on ARM64 where crashpad needs the database
+      const userDataDir = path.join(os.homedir(), '.config', 'chromium-onesibox');
+      const crashReportsDir = path.join(userDataDir, 'Crash Reports');
+
+      try {
+        fs.mkdirSync(crashReportsDir, { recursive: true });
+        logger.debug('Created crash reports directory', { path: crashReportsDir });
+      } catch (err) {
+        logger.warn('Could not create crash reports directory', { error: err.message });
+      }
+
       const launchOptions = {
         headless: false,
         args: launchArgs,
@@ -127,17 +143,20 @@ class BrowserController {
         logger.info('Using Playwright bundled Chromium');
       }
 
-      // Launch browser
-      this.browser = await chromium.launch(launchOptions);
-
-      // Create browser context
-      this.context = await this.browser.newContext({
+      // Launch browser with persistent context to use persistent user data directory
+      // This fixes crashpad issues on ARM64 where the Crash Reports directory must exist
+      this.context = await chromium.launchPersistentContext(userDataDir, {
+        ...launchOptions,
         viewport: null, // Use full screen
         ignoreHTTPSErrors: true,
       });
 
-      // Create main page
-      this.page = await this.context.newPage();
+      // Get browser reference from context
+      this.browser = this.context.browser();
+
+      // Get or create main page
+      const pages = this.context.pages();
+      this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
 
       // Navigate to standby
       await this.page.goto(STANDBY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
