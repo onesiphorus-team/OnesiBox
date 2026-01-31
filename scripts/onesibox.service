@@ -22,7 +22,7 @@ WorkingDirectory=/opt/onesibox
 # NOTA: NoNewPrivileges=true non puo' essere usato perche' il servizio
 # ha bisogno di sudo per comandi di reboot/restart (via /etc/sudoers.d/onesibox)
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 ReadWritePaths=/opt/onesibox /var/log/onesibox
 PrivateTmp=true
 
