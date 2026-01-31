@@ -562,6 +562,8 @@ setup_systemd_service() {
 Description=OnesiBox Client - $DEVICE_NAME
 After=network-online.target graphical.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -569,9 +571,8 @@ User=$SERVICE_USER
 ExecStart=/usr/bin/node $INSTALL_DIR/src/main.js
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=5
 Environment=NODE_ENV=production
+Environment=DISPLAY=:1
 WorkingDirectory=$INSTALL_DIR
 
 # Sicurezza
