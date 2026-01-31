@@ -7,7 +7,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=debian
+# User will be set dynamically by install.sh based on detected kiosk user
+User=admin
 ExecStart=/usr/bin/node /opt/onesibox/src/main.js
 Restart=always
 RestartSec=10
@@ -15,25 +16,16 @@ Environment=NODE_ENV=production
 # Display environment - supports both X11 and Wayland
 Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
+# XDG_RUNTIME_DIR will be set dynamically based on user UID
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 WorkingDirectory=/opt/onesibox
 
 # Sicurezza
-# NOTA: NoNewPrivileges=true non puo' essere usato perche' il servizio
-# ha bisogno di sudo per comandi di reboot/restart (via /etc/sudoers.d/onesibox)
+# ProtectHome=read-only to allow access to Playwright browser cache
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/onesibox /var/log/onesibox /home/debian
+ReadWritePaths=/opt/onesibox /var/log/onesibox
 PrivateTmp=true
-
-# Sensitive configuration via environment variables (recommended for production)
-# Uncomment and set these instead of storing in config.json:
-# Environment=ONESIBOX_SERVER_URL=https://onesiforo.example.com
-# Environment=ONESIBOX_APPLIANCE_ID=your-appliance-uuid
-# Environment=ONESIBOX_TOKEN=your-secret-token
-#
-# Or load from a separate credentials file (more secure):
-# EnvironmentFile=/opt/onesibox/config/credentials.env
 
 [Install]
 WantedBy=graphical.target
