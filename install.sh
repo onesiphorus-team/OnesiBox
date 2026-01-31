@@ -399,11 +399,16 @@ install_system_packages() {
 
     # Chromium (funziona su X11 e Wayland)
     print_info "Installazione Chromium..."
-    apt install -y -qq chromium
+    # Try 'chromium' first (Debian 12+, RPi OS Bookworm), fallback to 'chromium-browser'
+    apt install -y -qq chromium 2>/dev/null || apt install -y -qq chromium-browser
     print_success "Chromium installato"
 
-    # Detect display server and install appropriate dependencies
-    if [ -n "$WAYLAND_DISPLAY" ] || [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+    # Detect display server (check system config, not current session since we run as root)
+    # On Raspberry Pi OS with PIXEL, labwc is default; check if labwc is installed
+    if command -v labwc &> /dev/null || [ -f /usr/share/wayland-sessions/labwc.desktop ]; then
+        print_info "Rilevato ambiente Wayland (labwc disponibile)"
+        DISPLAY_SERVER="wayland"
+    elif [ -f /etc/xdg/labwc/autostart ] || [ -d /usr/share/wayland-sessions ]; then
         print_info "Rilevato ambiente Wayland"
         DISPLAY_SERVER="wayland"
     else
@@ -447,8 +452,14 @@ setup_user_and_directories() {
 
     # Aggiungi ai gruppi necessari
     print_info "Configurazione gruppi..."
-    usermod -aG video,audio,input,gpio,i2c,spi "$SERVICE_USER" 2>/dev/null || \
-    usermod -aG video,audio,input "$SERVICE_USER"
+    # Gruppi base (esistono su tutti i sistemi)
+    usermod -aG video,audio,input "$SERVICE_USER" 2>/dev/null || true
+    # Gruppi Raspberry Pi (potrebbero non esistere su Debian standard)
+    usermod -aG gpio,i2c,spi "$SERVICE_USER" 2>/dev/null || true
+    # Gruppo seat per Wayland (seatd)
+    usermod -aG seat "$SERVICE_USER" 2>/dev/null || true
+    # Gruppo render per GPU
+    usermod -aG render "$SERVICE_USER" 2>/dev/null || true
     print_success "Gruppi configurati"
 
     # Crea directory
