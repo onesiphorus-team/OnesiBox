@@ -399,7 +399,8 @@ install_system_packages() {
 
     # Node.js 20 LTS
     print_info "Installazione Node.js 20 LTS..."
-    NODE_VERSION=$(node -v 2>/dev/null | cut -d. -f1 | tr -d 'v' || echo "0")
+    NODE_VERSION=$(node -v 2>/dev/null | cut -d. -f1 | tr -d 'v')
+    NODE_VERSION=${NODE_VERSION:-0}
     if [ "$NODE_VERSION" -lt 20 ]; then
         print_info "Aggiornamento Node.js da v$NODE_VERSION a v20..."
         apt remove -y -qq nodejs npm 2>/dev/null || true
