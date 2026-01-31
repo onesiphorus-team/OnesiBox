@@ -396,11 +396,21 @@ install_system_packages() {
     apt upgrade -y -qq
     print_success "Sistema aggiornato"
 
-    # Node.js
+    # Node.js 20 LTS
     print_info "Installazione Node.js 20 LTS..."
-    if ! command -v node &> /dev/null || [[ $(node -v | cut -d. -f1 | tr -d 'v') -lt 20 ]]; then
+    NODE_VERSION=$(node -v 2>/dev/null | cut -d. -f1 | tr -d 'v' || echo "0")
+    if [ "$NODE_VERSION" -lt 20 ]; then
+        print_info "Aggiornamento Node.js da v$NODE_VERSION a v20..."
+        # Remove old nodejs if present
+        apt remove -y -qq nodejs npm 2>/dev/null || true
+        # Install Node.js 20 from nodesource
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
         apt install -y -qq nodejs
+    fi
+    # Ensure npm is installed (sometimes missing on Debian)
+    if ! command -v npm &> /dev/null; then
+        print_info "Installazione npm..."
+        apt install -y -qq npm 2>/dev/null || true
     fi
     print_success "Node.js $(node --version) installato"
 
