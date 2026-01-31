@@ -12,6 +12,7 @@ const ApiClient = require('./communication/api-client');
 const BrowserController = require('./browser/controller');
 const CommandManager = require('./commands/manager');
 const AutoUpdater = require('./update/auto-updater');
+const { getVolume } = require('./commands/handlers/volume');
 
 const execFileAsync = promisify(execFile);
 
@@ -419,6 +420,7 @@ async function startHeartbeat() {
           position: state.currentMedia.position,
           duration: state.currentMedia.duration
         } : null,
+        volume: state.volume,
         cpu_usage: Math.round(cpu.currentLoad),
         memory_usage: Math.round((mem.used / mem.total) * 100),
         disk_usage: disk[0] ? Math.round(disk[0].use) : 0,
@@ -535,6 +537,17 @@ async function main() {
     await browserController.initialize();
   } catch (error) {
     logger.warn('Could not initialize browser at startup', { error: error.message });
+  }
+
+  // Try to read actual system volume at startup
+  try {
+    const systemVolume = await getVolume();
+    if (systemVolume !== null) {
+      stateManager.setVolume(systemVolume);
+      logger.info('Volume initialized from system', { level: systemVolume });
+    }
+  } catch (error) {
+    logger.warn('Could not read initial system volume, using default', { error: error.message });
   }
 
   await startPolling();
