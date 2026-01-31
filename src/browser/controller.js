@@ -1,17 +1,31 @@
-const { execFile, spawn } = require('child_process');
-const { promisify } = require('util');
+const { chromium } = require('playwright');
+const { execSync } = require('child_process');
 const logger = require('../logging/logger');
 const { isUrlAllowed, isZoomUrl } = require('../commands/validator');
-
-const execFileAsync = promisify(execFile);
 
 const STANDBY_URL = 'http://localhost:3000';
 const LOCAL_URL_PREFIX = 'http://localhost:3000/';
 
-// Chromium binary - configurable via environment variable
-// Default: 'chromium' (Debian 12+/Raspberry Pi OS Bookworm)
-// Alternative: 'chromium-browser' (older Debian/Ubuntu)
-const CHROMIUM_BIN = process.env.CHROMIUM_BIN || 'chromium';
+// Find system Chromium executable
+function findChromiumPath() {
+  const paths = [
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/snap/bin/chromium',
+  ];
+
+  for (const p of paths) {
+    try {
+      execSync(`test -x ${p}`, { stdio: 'ignore' });
+      return p;
+    } catch {
+      continue;
+    }
+  }
+
+  // Fallback: let Playwright use its bundled browser
+  return null;
+}
 
 /**
  * Check if URL is a local application URL (localhost:3000)
@@ -22,16 +36,115 @@ function isLocalUrl(url) {
 
 /**
  * Controls the Chromium browser for media playback and navigation.
- * Uses xdotool for browser automation on Linux/Raspberry Pi.
+ * Uses Playwright for browser automation - works on both X11 and Wayland.
  *
- * SECURITY: All shell commands use execFile with argument arrays
- * to prevent command injection vulnerabilities.
+ * SECURITY: All URLs are validated before navigation.
  */
 class BrowserController {
   constructor() {
     this.currentUrl = STANDBY_URL;
-    this.browserPid = null; // Track the PID of our browser process
+    this.browser = null;
+    this.context = null;
+    this.page = null;
     this.isInitialized = false;
+  }
+
+  /**
+   * Initialize the browser on startup.
+   * Launches Chromium in kiosk mode using Playwright.
+   */
+  async initialize() {
+    if (this.isInitialized) {
+      logger.debug('Browser already initialized');
+      return;
+    }
+
+    logger.info('Initializing browser controller with Playwright');
+
+    try {
+      // Detect display server (Wayland or X11)
+      const isWayland = process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === 'wayland';
+      logger.info('Display server detected', { isWayland, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY });
+
+      // Browser launch arguments for kiosk mode
+      const launchArgs = [
+        '--kiosk',
+        '--noerrdialogs',
+        '--disable-infobars',
+        '--no-first-run',
+        '--autoplay-policy=no-user-gesture-required',
+        '--disable-session-crashed-bubble',
+        '--disable-features=TranslateUI',
+        '--check-for-update-interval=31536000',
+        '--disable-component-update',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-default-apps',
+        '--start-fullscreen',
+        '--use-fake-ui-for-media-stream',
+      ];
+
+      // Add Wayland-specific flags if running on Wayland
+      if (isWayland) {
+        launchArgs.push(
+          '--enable-features=UseOzonePlatform',
+          '--ozone-platform=wayland',
+          '--enable-features=WebRTCPipeWireCapturer'
+        );
+        logger.info('Added Wayland-specific browser flags');
+      }
+
+      // Find system Chromium or use Playwright's bundled browser
+      const chromiumPath = findChromiumPath();
+      const launchOptions = {
+        headless: false,
+        args: launchArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
+      };
+
+      // Use system Chromium if available (required for Raspberry Pi)
+      if (chromiumPath) {
+        launchOptions.executablePath = chromiumPath;
+        logger.info('Using system Chromium', { path: chromiumPath });
+      } else {
+        logger.info('Using Playwright bundled Chromium');
+      }
+
+      // Launch browser
+      this.browser = await chromium.launch(launchOptions);
+
+      // Create browser context
+      this.context = await this.browser.newContext({
+        viewport: null, // Use full screen
+        ignoreHTTPSErrors: true,
+      });
+
+      // Create main page
+      this.page = await this.context.newPage();
+
+      // Navigate to standby
+      await this.page.goto(STANDBY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      this.currentUrl = STANDBY_URL;
+
+      // Handle page crashes
+      this.page.on('crash', async () => {
+        logger.error('Page crashed, attempting recovery');
+        await this._recoverFromCrash();
+      });
+
+      // Handle browser disconnection
+      this.browser.on('disconnected', async () => {
+        logger.error('Browser disconnected, attempting restart');
+        this.isInitialized = false;
+        await this.initialize();
+      });
+
+      this.isInitialized = true;
+      logger.info('Browser controller initialized successfully');
+    } catch (error) {
+      logger.error('Failed to initialize browser', { error: error.message });
+      throw error;
+    }
   }
 
   /**
@@ -46,100 +159,88 @@ class BrowserController {
       throw new Error(`URL not allowed: ${url}`);
     }
 
-    // Additional sanitization: ensure URL doesn't contain shell metacharacters
-    // even though we use execFile, this provides defense in depth
-    // Skip check for local URLs (they are trusted and may contain & for query params)
+    // Additional sanitization for non-local URLs
     if (!isLocalUrl(url) && this._containsShellMetacharacters(url)) {
       throw new Error('URL contains invalid characters');
     }
 
     logger.info('Navigating to URL', { url });
 
-    // Try xdotool navigation first (preferred method - doesn't launch new browser)
-    let xdotoolSuccess = false;
     try {
-      // Use Ctrl+L to focus address bar (more reliable than F5+type)
-      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'ctrl+l']);
-      await this._delay(100);
-      await this._xdotoolCommand(['type', '--clearmodifiers', url]);
-      await this._xdotoolCommand(['key', 'Return']);
-      xdotoolSuccess = true;
-    } catch (xdotoolError) {
-      logger.debug('xdotool navigation failed', { error: xdotoolError.message });
-    }
+      await this._ensureBrowserReady();
 
-    // Fallback: launch new browser ONLY if we don't have one running
-    if (!xdotoolSuccess) {
-      if (this.browserPid) {
-        // We have a browser but xdotool failed - try restarting our own
-        logger.warn('xdotool failed but browser exists, restarting own browser');
-        await this._restartOwnBrowser(url);
-      } else {
-        // No browser at all - launch one
-        logger.info('No browser running, launching new instance');
-        try {
-          await this._launchBrowser(url);
-        } catch (error) {
-          logger.error('Failed to launch browser', { url, error: error.message });
-          throw error;
-        }
+      // Stop any playing media first
+      await this._stopAllMedia();
+
+      // Navigate to new URL
+      await this.page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
+
+      this.currentUrl = url;
+      logger.info('Navigation successful', { url });
+    } catch (error) {
+      logger.error('Navigation failed', { url, error: error.message });
+
+      // Try to recover
+      try {
+        await this._recoverFromCrash();
+        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        this.currentUrl = url;
+      } catch (retryError) {
+        logger.error('Navigation retry failed', { error: retryError.message });
+        throw error;
       }
     }
-
-    this.currentUrl = url;
   }
 
   /**
    * Navigate back to the standby screen.
-   * Stops any playing media first using JavaScript, then navigates.
-   * Does NOT restart the browser to avoid disrupting other browser contexts (e.g., Zoom Playwright).
+   * Stops any playing media first, then navigates.
    */
   async goToStandby() {
     logger.info('Going to standby');
 
     try {
-      // First, stop any media playback via JavaScript to ensure clean stop
+      await this._ensureBrowserReady();
+
+      // Stop any media playback
       await this._stopAllMedia();
 
       // Small delay to ensure media is stopped
       await this._delay(100);
 
-      // Navigate to standby using the standard navigation
-      await this._navigateToUrl(STANDBY_URL);
-      this.currentUrl = STANDBY_URL;
+      // Navigate to standby
+      await this.page.goto(STANDBY_URL, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
 
+      this.currentUrl = STANDBY_URL;
       logger.info('Navigated to standby successfully');
     } catch (error) {
-      logger.warn('Failed to navigate to standby cleanly, attempting browser restart', { error: error.message });
-      // Only restart as last resort
-      await this._restartOwnBrowser(STANDBY_URL);
+      logger.warn('Failed to navigate to standby cleanly', { error: error.message });
+
+      // Try recovery
+      await this._recoverFromCrash();
     }
   }
 
   /**
    * Stop all media playback in the browser using JavaScript.
-   * This ensures video/audio stops without needing to kill the browser.
    */
   async _stopAllMedia() {
     try {
-      // Stop all video and audio elements
-      const stopScript = `
+      await this.page.evaluate(() => {
+        // Stop all video and audio elements
         document.querySelectorAll('video, audio').forEach(el => {
           el.pause();
           el.currentTime = 0;
           el.src = '';
           el.load();
         });
-      `.replace(/\n/g, ' ').trim();
-
-      // Try via xdotool console execution
-      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'F12']);
-      await this._delay(300);
-      await this._xdotoolCommand(['type', '--clearmodifiers', stopScript]);
-      await this._xdotoolCommand(['key', 'Return']);
-      await this._delay(200);
-      await this._xdotoolCommand(['key', 'F12']);
-
+      });
       logger.debug('Media stop script executed');
     } catch (error) {
       // Not critical - navigation will handle it
@@ -148,126 +249,25 @@ class BrowserController {
   }
 
   /**
-   * Navigate to a URL using xdotool. Does not launch new browser.
-   * @param {string} url - URL to navigate to
-   * @private
-   */
-  async _navigateToUrl(url) {
-    // Try to use xdotool to navigate in existing window
-    await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'ctrl+l']);
-    await this._delay(100);
-    await this._xdotoolCommand(['type', '--clearmodifiers', url]);
-    await this._xdotoolCommand(['key', 'Return']);
-  }
-
-  /**
-   * Restart only our own browser process (if we track it) or launch a new one.
-   * This is a fallback for when navigation fails.
-   * Does NOT use pkill to avoid killing Playwright browsers.
-   *
-   * @param {string} url - The URL to open
-   * @private
-   */
-  async _restartOwnBrowser(url = STANDBY_URL) {
-    logger.info('Restarting own browser process', { url });
-
-    try {
-      // Kill only our tracked browser process if we have one
-      if (this.browserPid) {
-        try {
-          await execFileAsync('kill', ['-9', String(this.browserPid)]);
-          logger.info('Killed own browser process', { pid: this.browserPid });
-        } catch {
-          // Process might already be dead
-          logger.debug('Browser process already terminated');
-        }
-        this.browserPid = null;
-      }
-
-      // Wait for process to terminate
-      await this._delay(300);
-
-      // Launch fresh browser
-      await this._launchBrowser(url);
-      this.currentUrl = url;
-
-      logger.info('Browser restarted successfully');
-    } catch (error) {
-      logger.error('Failed to restart browser', { error: error.message });
-      throw error;
-    }
-  }
-
-  /**
-   * Force kill all Chromium processes and relaunch.
-   * Use sparingly - this will kill Playwright browsers too!
-   * Should only be used for initialization or critical recovery.
-   *
-   * @param {string} url - The URL to open after restart
-   */
-  async forceRestartBrowser(url = STANDBY_URL) {
-    logger.info('Force restarting all browsers', { url });
-
-    try {
-      // Kill all chromium processes
-      await execFileAsync('pkill', ['-f', 'chromium']).catch(() => {
-        // Ignore errors if no chromium is running
-      });
-
-      // Wait for processes to terminate
-      await this._delay(500);
-
-      // Launch fresh browser
-      await this._launchBrowser(url);
-      this.currentUrl = url;
-
-      logger.info('Browser force restarted successfully');
-    } catch (error) {
-      logger.error('Failed to force restart browser', { error: error.message });
-      throw error;
-    }
-  }
-
-  /**
-   * Initialize the browser on startup.
-   * This is the only place where force restart should be used.
-   */
-  async initialize() {
-    if (this.isInitialized) {
-      logger.debug('Browser already initialized');
-      return;
-    }
-
-    logger.info('Initializing browser controller');
-    await this.forceRestartBrowser(STANDBY_URL);
-    this.isInitialized = true;
-  }
-
-  /**
-   * Execute a JavaScript snippet in the browser console.
+   * Execute a JavaScript snippet in the browser.
    *
    * @param {string} script - The JavaScript to execute
    * @throws {Error} If script execution fails
    */
   async executeScript(script) {
-    // Sanitize script to prevent injection
-    if (this._containsShellMetacharacters(script)) {
-      throw new Error('Script contains invalid characters');
-    }
-
     logger.info('Executing browser script', { script: script.substring(0, 100) });
 
     try {
-      // Open DevTools
-      await this._xdotoolCommand(['search', '--onlyvisible', '--class', 'chromium', 'key', '--window', '%@', 'F12']);
-      await this._delay(500);
+      await this._ensureBrowserReady();
 
-      // Type the script (using type command with clearmodifiers for safety)
-      await this._xdotoolCommand(['type', '--clearmodifiers', script]);
-      await this._xdotoolCommand(['key', 'Return']);
+      // Execute script via Playwright
+      const result = await this.page.evaluate((code) => {
+        // Use Function constructor to execute arbitrary code
+        return new Function(code)();
+      }, script);
 
-      // Close DevTools
-      await this._xdotoolCommand(['key', 'F12']);
+      logger.debug('Script executed successfully');
+      return result;
     } catch (error) {
       logger.error('Failed to execute script', { error: error.message });
       throw error;
@@ -279,7 +279,12 @@ class BrowserController {
    */
   async pause() {
     try {
-      await this.executeScript('document.querySelector("video")?.pause()');
+      await this._ensureBrowserReady();
+      await this.page.evaluate(() => {
+        const video = document.querySelector('video');
+        if (video) video.pause();
+      });
+      logger.info('Video paused');
     } catch (error) {
       logger.warn('Failed to pause video', { error: error.message });
     }
@@ -290,7 +295,12 @@ class BrowserController {
    */
   async resume() {
     try {
-      await this.executeScript('document.querySelector("video")?.play()');
+      await this._ensureBrowserReady();
+      await this.page.evaluate(() => {
+        const video = document.querySelector('video');
+        if (video) video.play();
+      });
+      logger.info('Video resumed');
     } catch (error) {
       logger.warn('Failed to resume video', { error: error.message });
     }
@@ -305,61 +315,88 @@ class BrowserController {
   }
 
   /**
-   * Execute xdotool with arguments safely.
-   * Uses execFile to prevent shell injection.
+   * Force restart the browser.
+   * Use sparingly - this will close and reopen the browser.
    *
-   * @param {string[]} args - Arguments to pass to xdotool
-   * @private
+   * @param {string} url - The URL to open after restart
    */
-  async _xdotoolCommand(args) {
-    return execFileAsync('xdotool', args);
+  async forceRestartBrowser(url = STANDBY_URL) {
+    logger.info('Force restarting browser', { url });
+
+    try {
+      // Close existing browser
+      await this._closeBrowser();
+
+      // Wait for cleanup
+      await this._delay(500);
+
+      // Reinitialize
+      this.isInitialized = false;
+      await this.initialize();
+
+      // Navigate to requested URL
+      if (url !== STANDBY_URL) {
+        await this.navigateTo(url);
+      }
+
+      logger.info('Browser force restarted successfully');
+    } catch (error) {
+      logger.error('Failed to force restart browser', { error: error.message });
+      throw error;
+    }
   }
 
   /**
-   * Launch Chromium browser with a URL safely.
-   * Uses spawn to prevent shell injection.
-   * Launches in kiosk mode for fullscreen without decorations.
-   * Tracks the PID for later selective termination.
-   *
-   * @param {string} url - The URL to open
-   * @private
+   * Close the browser gracefully.
    */
-  async _launchBrowser(url) {
-    return new Promise((resolve, reject) => {
-      // Kiosk mode flags for fullscreen without decorations
-      const chromiumArgs = [
-        '--kiosk',                              // Fullscreen kiosk mode
-        '--noerrdialogs',                       // No error dialogs
-        '--disable-infobars',                   // No info bars
-        '--no-first-run',                       // Skip first run wizard
-        '--autoplay-policy=no-user-gesture-required', // Allow autoplay
-        '--disable-session-crashed-bubble',    // No crash bubbles
-        '--disable-features=TranslateUI',      // No translate popup
-        '--check-for-update-interval=31536000', // Disable update check
-        url
-      ];
+  async _closeBrowser() {
+    try {
+      if (this.page) {
+        await this.page.close().catch(() => {});
+        this.page = null;
+      }
+      if (this.context) {
+        await this.context.close().catch(() => {});
+        this.context = null;
+      }
+      if (this.browser) {
+        await this.browser.close().catch(() => {});
+        this.browser = null;
+      }
+    } catch (error) {
+      logger.debug('Error closing browser', { error: error.message });
+    }
+  }
 
-      // Use spawn with detached option instead of exec with '&'
-      const child = spawn(CHROMIUM_BIN, chromiumArgs, {
-        detached: true,
-        stdio: 'ignore'
-      });
+  /**
+   * Ensure browser is ready for operations.
+   */
+  async _ensureBrowserReady() {
+    if (!this.isInitialized || !this.page || this.page.isClosed()) {
+      logger.warn('Browser not ready, reinitializing');
+      this.isInitialized = false;
+      await this.initialize();
+    }
+  }
 
-      // Track our browser PID for selective termination
-      this.browserPid = child.pid;
-      logger.info('Browser launched', { binary: CHROMIUM_BIN, pid: this.browserPid, url });
+  /**
+   * Recover from a crash or error state.
+   */
+  async _recoverFromCrash() {
+    logger.info('Attempting crash recovery');
 
-      child.unref();
+    try {
+      await this._closeBrowser();
+      await this._delay(1000);
 
-      // Consider launch successful immediately
-      // (browser runs independently)
-      setTimeout(resolve, 1000);
+      this.isInitialized = false;
+      await this.initialize();
 
-      child.on('error', (error) => {
-        this.browserPid = null;
-        reject(error);
-      });
-    });
+      logger.info('Crash recovery successful');
+    } catch (error) {
+      logger.error('Crash recovery failed', { error: error.message });
+      throw error;
+    }
   }
 
   /**
@@ -371,7 +408,6 @@ class BrowserController {
    * @private
    */
   _containsShellMetacharacters(str) {
-    // Characters that could be dangerous in shell context
     const dangerousChars = /[`$\\;|&><\n\r]/;
     return dangerousChars.test(str);
   }
@@ -384,6 +420,15 @@ class BrowserController {
    */
   _delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Cleanup on shutdown.
+   */
+  async shutdown() {
+    logger.info('Shutting down browser controller');
+    await this._closeBrowser();
+    this.isInitialized = false;
   }
 }
 

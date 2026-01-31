@@ -397,18 +397,21 @@ install_system_packages() {
     apt install -y -qq git
     print_success "Git installato"
 
-    # Chromium e display (supporto sia Wayland che X11)
-    print_info "Installazione Chromium e dipendenze display..."
-    apt install -y -qq \
-        chromium \
-        cage \
-        xserver-xorg \
-        x11-xserver-utils \
-        xinit \
-        openbox \
-        xdotool \
-        wtype
-    print_success "Chromium, Cage (Wayland) e X11 installati"
+    # Chromium (funziona su X11 e Wayland)
+    print_info "Installazione Chromium..."
+    apt install -y -qq chromium
+    print_success "Chromium installato"
+
+    # Detect display server and install appropriate dependencies
+    if [ -n "$WAYLAND_DISPLAY" ] || [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+        print_info "Rilevato ambiente Wayland"
+        DISPLAY_SERVER="wayland"
+    else
+        print_info "Rilevato ambiente X11 (o non grafico)"
+        DISPLAY_SERVER="x11"
+        # Install X11 tools only if not on Wayland
+        apt install -y -qq x11-xserver-utils xdotool unclutter 2>/dev/null || true
+    fi
 
     # Audio
     print_info "Installazione strumenti audio..."
@@ -422,7 +425,7 @@ install_system_packages() {
 
     # Utilities
     print_info "Installazione utilities..."
-    apt install -y -qq curl wget jq unclutter
+    apt install -y -qq curl wget jq
     print_success "Utilities installate"
 }
 
@@ -574,7 +577,10 @@ ExecStart=/usr/bin/node $INSTALL_DIR/src/main.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-Environment=DISPLAY=:1
+# Display environment - set dynamically based on session type
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 WorkingDirectory=$INSTALL_DIR
 
 # Sicurezza
@@ -598,138 +604,33 @@ EOF
 }
 
 # ============================================================================
-# Configurazione kiosk mode (gestito interamente da systemd)
+# Configurazione kiosk mode (via XDG autostart - semplice e universale)
 # ============================================================================
 
 setup_kiosk_service() {
     print_step "Configurazione Modalità Kiosk"
 
-    USER_HOME=$(eval echo ~$SERVICE_USER)
+    # 1. Configura lightdm per autologin
+    print_info "Configurazione autologin lightdm..."
+    if [ -f /etc/lightdm/lightdm.conf ]; then
+        # Rimuovi eventuali configurazioni autologin esistenti
+        sed -i '/^\[Seat:\*\]/,/^$/d' /etc/lightdm/lightdm.conf 2>/dev/null || true
+        sed -i '/^autologin-/d' /etc/lightdm/lightdm.conf 2>/dev/null || true
 
-    # Crea script di avvio kiosk che funziona sia con X11 che Wayland
-    print_info "Creazione script kiosk universale..."
-    cat > "$INSTALL_DIR/scripts/kiosk-launcher.sh" << 'KIOSKEOF'
-#!/bin/bash
-# OnesiBox Kiosk Launcher - Funziona con X11 e Wayland
-# Gestito da systemd, non richiede login utente
+        # Aggiungi configurazione autologin
+        cat >> /etc/lightdm/lightdm.conf << EOF
 
-URL="${1:-http://localhost:3000}"
-KIOSK_USER="${2:-onesibox}"
-
-# Chromium flags comuni
-CHROMIUM_FLAGS=(
-    --kiosk
-    --noerrdialogs
-    --disable-infobars
-    --disable-session-crashed-bubble
-    --disable-restore-session-state
-    --autoplay-policy=no-user-gesture-required
-    --use-fake-ui-for-media-stream
-    --enable-features=WebRTCPipeWireCapturer
-    --disable-features=TranslateUI
-    --check-for-update-interval=31536000
-    --disable-component-update
-    --disable-background-networking
-    --disable-sync
-    --disable-default-apps
-    --no-first-run
-    --start-fullscreen
-    --disable-pinch
-    --overscroll-history-navigation=0
-)
-
-# Aspetta che il server Node.js sia pronto
-echo "Attendo che OnesiBox sia pronto..."
-for i in {1..30}; do
-    if curl -s "$URL/api/status" > /dev/null 2>&1; then
-        echo "OnesiBox pronto!"
-        break
-    fi
-    sleep 1
-done
-
-# Prova prima con cage (Wayland kiosk compositor) - piu' affidabile
-if command -v cage &> /dev/null; then
-    echo "Avvio kiosk con Cage (Wayland)..."
-    export WLR_LIBINPUT_NO_DEVICES=1
-    exec cage -s -- chromium "${CHROMIUM_FLAGS[@]}" "$URL"
-fi
-
-# Fallback: X11 con xinit
-if command -v xinit &> /dev/null; then
-    echo "Avvio kiosk con X11..."
-
-    # Crea xinitrc temporaneo
-    XINITRC=$(mktemp)
-    cat > "$XINITRC" << XINIT
-#!/bin/bash
-xset s off
-xset -dpms
-xset s noblank
-unclutter -idle 1 -root &
-exec chromium ${CHROMIUM_FLAGS[@]} "$URL"
-XINIT
-    chmod +x "$XINITRC"
-
-    exec xinit "$XINITRC" -- :0 vt1 -keeptty -nolisten tcp
-fi
-
-echo "ERRORE: Nessun display server disponibile (cage o xinit)"
-exit 1
-KIOSKEOF
-
-    chmod +x "$INSTALL_DIR/scripts/kiosk-launcher.sh"
-    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts/kiosk-launcher.sh"
-    print_success "Script kiosk creato"
-
-    # Crea servizio systemd per il kiosk
-    print_info "Creazione servizio kiosk..."
-    cat > /etc/systemd/system/onesibox-kiosk.service << EOF
-[Unit]
-Description=OnesiBox Kiosk Display
-After=onesibox.service
-Wants=onesibox.service
-ConditionPathExists=$INSTALL_DIR/scripts/kiosk-launcher.sh
-
-[Service]
-Type=simple
-User=$SERVICE_USER
-Group=$SERVICE_USER
-PAMName=login
-TTYPath=/dev/tty1
-StandardInput=tty
-StandardOutput=tty
-StandardError=journal
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
-
-ExecStart=$INSTALL_DIR/scripts/kiosk-launcher.sh http://localhost:3000 $SERVICE_USER
-Restart=always
-RestartSec=5
-
-# Permetti accesso al display
-SupplementaryGroups=video audio input render
-
-[Install]
-WantedBy=graphical.target
+[Seat:*]
+autologin-user=$SERVICE_USER
+autologin-user-timeout=0
 EOF
+        print_success "Autologin lightdm configurato"
+    else
+        print_warning "lightdm.conf non trovato, autologin non configurato"
+    fi
 
-    print_success "Servizio kiosk creato"
-
-    # Disabilita getty su tty1 (il kiosk lo usa)
-    print_info "Configurazione TTY1 per kiosk..."
-    systemctl disable getty@tty1.service 2>/dev/null || true
-    systemctl stop getty@tty1.service 2>/dev/null || true
-    print_success "TTY1 configurato"
-
-    # Abilita servizio kiosk
-    systemctl daemon-reload
-    systemctl enable onesibox-kiosk.service
-    print_success "Servizio kiosk abilitato"
-
-    # Configura anche XDG autostart come fallback per desktop environment
-    print_info "Configurazione fallback per desktop environment..."
+    # 2. Crea XDG autostart per avviare Chromium kiosk
+    print_info "Configurazione XDG autostart..."
     mkdir -p /etc/xdg/autostart
     cat > /etc/xdg/autostart/onesibox-kiosk.desktop << EOF
 [Desktop Entry]
@@ -739,12 +640,81 @@ Comment=OnesiBox Chromium Kiosk Mode
 Exec=$INSTALL_DIR/scripts/start-kiosk.sh http://localhost:3000
 Terminal=false
 X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Delay=5
-OnlyShowIn=GNOME;XFCE;LXDE;MATE;Cinnamon;
+StartupNotify=false
 EOF
-    print_success "Fallback desktop configurato"
+    print_success "XDG autostart configurato"
 
-    print_success "Modalità kiosk configurata"
+    # 3. Aggiorna lo script start-kiosk.sh per aspettare il backend
+    # Questo script NON avvia più Chromium - Playwright lo gestisce internamente
+    print_info "Aggiornamento script start-kiosk.sh..."
+    cat > "$INSTALL_DIR/scripts/start-kiosk.sh" << 'EOF'
+#!/bin/bash
+# OnesiBox Kiosk Launcher
+# Nota: Chromium viene ora gestito da Playwright nel backend Node.js
+# Questo script serve solo per compatibilità e per eventuali setup iniziali
+
+URL="${1:-http://localhost:3000}"
+
+# Detect display server
+if [ -n "$WAYLAND_DISPLAY" ] || [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+    echo "Running on Wayland"
+    IS_WAYLAND=true
+else
+    echo "Running on X11"
+    IS_WAYLAND=false
+
+    # X11-specific: Disable screensaver and DPMS
+    xset s off 2>/dev/null || true
+    xset -dpms 2>/dev/null || true
+    xset s noblank 2>/dev/null || true
+
+    # X11-specific: Hide cursor
+    unclutter -idle 3 -root &
+fi
+
+# Wait for OnesiBox backend to be ready
+echo "Waiting for OnesiBox backend..."
+for i in {1..60}; do
+    if curl -s "$URL/api/status" > /dev/null 2>&1; then
+        echo "Backend ready!"
+        break
+    fi
+    sleep 1
+done
+
+# The browser is now managed by Playwright in the Node.js backend
+# This script can optionally start a fallback browser if needed
+# For now, we just wait and let the systemd service handle everything
+
+echo "OnesiBox kiosk startup complete"
+# Keep running to maintain the session
+exec sleep infinity
+EOF
+    chmod +x "$INSTALL_DIR/scripts/start-kiosk.sh"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts/start-kiosk.sh"
+    print_success "Script kiosk aggiornato"
+
+    print_success "Modalità kiosk configurata (autologin + XDG autostart)"
+
+    # 4. Setup labwc configuration for Wayland (Raspberry Pi OS with PIXEL)
+    print_info "Configurazione labwc per Wayland..."
+    LABWC_CONFIG_DIR="/home/$SERVICE_USER/.config/labwc"
+    mkdir -p "$LABWC_CONFIG_DIR"
+
+    # Copy labwc configuration files if they exist
+    if [ -d "$INSTALL_DIR/config/labwc" ]; then
+        cp -f "$INSTALL_DIR/config/labwc/"* "$LABWC_CONFIG_DIR/" 2>/dev/null || true
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$LABWC_CONFIG_DIR"
+        print_success "Configurazione labwc copiata"
+    else
+        # Create minimal autostart
+        cat > "$LABWC_CONFIG_DIR/autostart" << EOF
+# OnesiBox labwc autostart
+$INSTALL_DIR/scripts/start-kiosk.sh http://localhost:3000 &
+EOF
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$LABWC_CONFIG_DIR"
+        print_success "Configurazione labwc minima creata"
+    fi
 }
 
 # ============================================================================
