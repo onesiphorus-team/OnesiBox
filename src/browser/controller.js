@@ -125,21 +125,30 @@ class BrowserController {
   }
 
   /**
-   * Initialize using Playwright with bundled Chromium
+   * Initialize using Playwright with system Chromium (for video codec support)
    */
   async _initPlaywright() {
-    // Use Playwright's bundled browser (not system Chromium)
-    // This avoids crashpad issues on ARM64
+    // Use system Chromium for proper video codec support (H.264/MP4)
+    // Playwright's bundled Chromium lacks proprietary codecs on Linux
+    this.chromiumPath = findChromiumPath();
+
+    const launchOptions = {
+      headless: false,
+      args: this.launchArgs,
+      ignoreDefaultArgs: ['--enable-automation'],
+      viewport: null,
+      ignoreHTTPSErrors: true,
+    };
+
+    // Use system Chromium if available for codec support
+    if (this.chromiumPath) {
+      launchOptions.executablePath = this.chromiumPath;
+      logger.info('Using system Chromium for codec support', { path: this.chromiumPath });
+    }
+
     this.playwrightContext = await chromium.launchPersistentContext(
       '/opt/onesibox/data/playwright-profile',
-      {
-        headless: false,
-        args: this.launchArgs,
-        ignoreDefaultArgs: ['--enable-automation'],
-        viewport: null,
-        ignoreHTTPSErrors: true,
-        // Don't specify executablePath - use Playwright's bundled browser
-      }
+      launchOptions
     );
 
     const pages = this.playwrightContext.pages();
