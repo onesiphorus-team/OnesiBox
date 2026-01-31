@@ -15,7 +15,7 @@ Environment=NODE_ENV=production
 # Display environment - supports both X11 and Wayland
 Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=XDG_RUNTIME_DIR=/run/user/%U
 WorkingDirectory=/opt/onesibox
 
 # Sicurezza

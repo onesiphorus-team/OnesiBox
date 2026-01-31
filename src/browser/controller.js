@@ -96,6 +96,9 @@ class BrowserController {
         '--disable-default-apps',
         '--start-fullscreen',
         '--use-fake-ui-for-media-stream',
+        '--disable-crashpad',
+        '--disable-crash-reporter',
+        '--disable-breakpad',
       ];
 
       // Add Wayland-specific flags if running on Wayland
