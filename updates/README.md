@@ -53,3 +53,4 @@ echo "Completato"
 | 002 | fix-systemd-permissions | Aggiunge /run/user/UID, DBUS e zoom directory al servizio systemd |
 | 003 | create-zoom-directory | Crea la directory ~/.onesibox-zoom per il client Zoom web |
 | 004 | install-playwright-browser | Installa il browser Playwright necessario per Zoom |
+| 005 | fix-zoom-directory-permissions | Aggiunge ~/.onesibox-zoom a ReadWritePaths per Zoom |
