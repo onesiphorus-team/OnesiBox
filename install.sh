@@ -589,12 +589,13 @@ Environment=NODE_ENV=production
 Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_RUNTIME_DIR=/run/user/$KIOSK_USER_UID
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$KIOSK_USER_UID/bus
 WorkingDirectory=$INSTALL_DIR
 
 # Sicurezza
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=$INSTALL_DIR $LOG_DIR $KIOSK_USER_HOME/.cache $KIOSK_USER_HOME/.config
+ReadWritePaths=$INSTALL_DIR $LOG_DIR $KIOSK_USER_HOME/.cache $KIOSK_USER_HOME/.config /run/user/$KIOSK_USER_UID
 PrivateTmp=true
 
 [Install]
