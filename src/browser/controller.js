@@ -85,7 +85,11 @@ class BrowserController {
       '--no-first-run',
       '--autoplay-policy=no-user-gesture-required',
       '--disable-session-crashed-bubble',
-      '--disable-features=TranslateUI',
+      // Disable translation popup completely
+      '--disable-features=TranslateUI,Translate',
+      '--disable-translate',
+      '--lang=it',
+      // Disable update checks
       '--check-for-update-interval=31536000',
       '--disable-component-update',
       '--disable-background-networking',
@@ -93,6 +97,10 @@ class BrowserController {
       '--disable-default-apps',
       '--start-fullscreen',
       '--no-sandbox',
+      // Camera and microphone permissions (for Zoom)
+      '--use-fake-ui-for-media-stream',
+      '--enable-usermedia-screen-capturing',
+      '--auto-accept-camera-and-microphone-capture',
     ];
 
     if (isWayland) {
@@ -138,6 +146,10 @@ class BrowserController {
       ignoreDefaultArgs: ['--enable-automation'],
       viewport: null,
       ignoreHTTPSErrors: true,
+      // Grant all permissions for camera, microphone, notifications
+      permissions: ['camera', 'microphone', 'notifications', 'geolocation'],
+      // Disable translation
+      locale: 'it-IT',
     };
 
     // Use system Chromium if available for codec support
