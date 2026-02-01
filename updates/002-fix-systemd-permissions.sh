@@ -25,14 +25,25 @@ if [[ -z "${KIOSK_USER_UID}" ]]; then
     exit 1
 fi
 
+KIOSK_HOME=$(eval echo "~${KIOSK_USER}")
+ZOOM_DIR="${KIOSK_HOME}/.onesibox-zoom"
+
 echo "Updating systemd service for user ${KIOSK_USER} (UID: ${KIOSK_USER_UID})"
 
-# Check if already fixed
+# Check if /run/user/UID already added
 if grep -q "/run/user/${KIOSK_USER_UID}" "${SERVICE_FILE}"; then
     echo "Service already has /run/user/${KIOSK_USER_UID} in ReadWritePaths"
 else
     echo "Adding /run/user/${KIOSK_USER_UID} to ReadWritePaths..."
     sed -i "s|ReadWritePaths=\(.*\)|ReadWritePaths=\1 /run/user/${KIOSK_USER_UID}|" "${SERVICE_FILE}"
+fi
+
+# Check if zoom directory already added
+if grep -q "${ZOOM_DIR}" "${SERVICE_FILE}"; then
+    echo "Service already has ${ZOOM_DIR} in ReadWritePaths"
+else
+    echo "Adding ${ZOOM_DIR} to ReadWritePaths..."
+    sed -i "s|ReadWritePaths=\(.*\)|ReadWritePaths=\1 ${ZOOM_DIR}|" "${SERVICE_FILE}"
 fi
 
 # Add DBUS_SESSION_BUS_ADDRESS if not present
