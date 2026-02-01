@@ -50,5 +50,7 @@ echo "Completato"
 
 | # | Nome | Descrizione |
 |---|------|-------------|
-| 001 | reset-browser-profile | Pulisce il profilo browser per applicare nuovi permessi camera/mic |
-| 002 | fix-systemd-permissions | Aggiunge /run/user/UID e DBUS al servizio systemd per Wayland |
+| 002 | fix-systemd-permissions | Aggiunge /run/user/UID, DBUS e zoom directory al servizio systemd |
+| 003 | create-zoom-directory | Crea la directory ~/.onesibox-zoom per il client Zoom web |
+| 004 | install-playwright-browser | Installa il browser Playwright necessario per Zoom |
+| 005 | fix-zoom-directory-permissions | Aggiunge ~/.onesibox-zoom a ReadWritePaths per Zoom |
