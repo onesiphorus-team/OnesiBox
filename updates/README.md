@@ -50,6 +50,6 @@ echo "Completato"
 
 | # | Nome | Descrizione |
 |---|------|-------------|
-| 002 | fix-systemd-permissions | Aggiunge /run/user/UID e DBUS al servizio systemd per Wayland |
+| 002 | fix-systemd-permissions | Aggiunge /run/user/UID, DBUS e zoom directory al servizio systemd |
 | 003 | create-zoom-directory | Crea la directory ~/.onesibox-zoom per il client Zoom web |
 | 004 | install-playwright-browser | Installa il browser Playwright necessario per Zoom |
