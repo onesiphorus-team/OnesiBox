@@ -51,3 +51,4 @@ echo "Completato"
 | # | Nome | Descrizione |
 |---|------|-------------|
 | 001 | reset-browser-profile | Pulisce il profilo browser per applicare nuovi permessi camera/mic |
+| 002 | fix-systemd-permissions | Aggiunge /run/user/UID e DBUS al servizio systemd per Wayland |
