@@ -469,12 +469,14 @@ setup_user_and_directories() {
     mkdir -p "$INSTALL_DIR/config"
     mkdir -p "$INSTALL_DIR/data/chromium"
     mkdir -p "$INSTALL_DIR/data/playwright-profile"
+    mkdir -p "$KIOSK_USER_HOME/.onesibox-zoom"
     mkdir -p "$LOG_DIR"
     print_success "Directory create"
 
     # Imposta permessi
     chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
     chown -R "$KIOSK_USER:$KIOSK_USER" "$LOG_DIR"
+    chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_USER_HOME/.onesibox-zoom"
     print_success "Permessi configurati"
 
     # Configura sudoers
@@ -524,11 +526,11 @@ install_application() {
     npm install --production --silent 2>/dev/null || npm install --production
     print_success "Dipendenze npm installate"
 
-    # Installa dipendenze Playwright (ma useremo Chromium di sistema per i codec)
-    print_info "Installazione dipendenze Playwright..."
+    # Installa dipendenze e browser Playwright (necessario per Zoom web client)
+    print_info "Installazione Playwright e dipendenze..."
     sudo -u "$KIOSK_USER" npx playwright install-deps chromium 2>/dev/null || true
-    # Non installiamo il browser Playwright perché usiamo quello di sistema per i codec video
-    print_success "Dipendenze Playwright installate (usa Chromium di sistema per codec H.264)"
+    sudo -u "$KIOSK_USER" npx playwright install chromium 2>/dev/null || true
+    print_success "Playwright installato (usato per Zoom, Chromium di sistema per video)"
 
     # Imposta permessi
     chown -R "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR"
