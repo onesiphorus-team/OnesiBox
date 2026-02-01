@@ -597,7 +597,7 @@ WorkingDirectory=$INSTALL_DIR
 # Sicurezza
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=$INSTALL_DIR $LOG_DIR $KIOSK_USER_HOME/.cache $KIOSK_USER_HOME/.config /run/user/$KIOSK_USER_UID
+ReadWritePaths=$INSTALL_DIR $LOG_DIR $KIOSK_USER_HOME/.cache $KIOSK_USER_HOME/.config /run/user/$KIOSK_USER_UID $KIOSK_USER_HOME/.onesibox-zoom
 PrivateTmp=true
 
 [Install]
