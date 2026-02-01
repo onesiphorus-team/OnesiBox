@@ -686,6 +686,46 @@ EOF
 }
 
 # ============================================================================
+# Configurazione aggiornamenti automatici
+# ============================================================================
+
+setup_auto_updates() {
+    print_step "Configurazione Aggiornamenti Automatici"
+
+    # Rendi eseguibili gli script di update
+    chmod +x "$INSTALL_DIR/update.sh" 2>/dev/null || true
+    chmod +x "$INSTALL_DIR/scripts/cron-update.sh" 2>/dev/null || true
+    chmod +x "$INSTALL_DIR/updates/"*.sh 2>/dev/null || true
+
+    # Crea directory per lo stato degli update
+    mkdir -p "$INSTALL_DIR/data"
+    chown "$KIOSK_USER:$KIOSK_USER" "$INSTALL_DIR/data"
+
+    # Chiedi se abilitare gli aggiornamenti automatici
+    echo -e "${CYAN}Gli aggiornamenti automatici verificano e installano nuove versioni ogni notte.${NC}"
+    if confirm "Vuoi abilitare gli aggiornamenti automatici?" "y"; then
+        # Installa cron job (usa lo script wrapper con delay random)
+        CRON_CMD="0 3 * * * /opt/onesibox/scripts/cron-update.sh"
+
+        # Rimuovi vecchio cron job se presente
+        crontab -u root -l 2>/dev/null | grep -v "onesibox.*update" | crontab -u root - 2>/dev/null || true
+
+        # Aggiungi nuovo cron job
+        (crontab -u root -l 2>/dev/null || true; echo "$CRON_CMD") | crontab -u root -
+
+        print_success "Aggiornamenti automatici abilitati (ogni notte alle 3:00)"
+    else
+        print_info "Aggiornamenti automatici non abilitati"
+        print_info "Puoi aggiornare manualmente con: sudo $INSTALL_DIR/update.sh"
+    fi
+
+    # Aggiungi permesso sudo per update senza password
+    if ! grep -q "update.sh" /etc/sudoers.d/onesibox 2>/dev/null; then
+        echo "$KIOSK_USER ALL=(ALL) NOPASSWD: $INSTALL_DIR/update.sh" >> /etc/sudoers.d/onesibox
+    fi
+}
+
+# ============================================================================
 # Avvio servizio e test
 # ============================================================================
 
@@ -719,6 +759,8 @@ print_summary() {
     echo -e "  • Stato servizio:    ${YELLOW}sudo systemctl status onesibox${NC}"
     echo -e "  • Log in tempo reale:${YELLOW}sudo journalctl -u onesibox -f${NC}"
     echo -e "  • Riavvia servizio:  ${YELLOW}sudo systemctl restart onesibox${NC}"
+    echo -e "  • Aggiorna manualmente: ${YELLOW}sudo $INSTALL_DIR/update.sh${NC}"
+    echo -e "  • Log aggiornamenti: ${YELLOW}cat $INSTALL_DIR/logs/update.log${NC}"
 
     echo -e "\n${BOLD}Prossimi passi:${NC}"
     echo -e "  1. ${CYAN}Registra l'appliance nel pannello Onesiforo${NC} se non l'hai già fatto"
@@ -747,6 +789,7 @@ main() {
     create_configuration
     setup_systemd_service
     setup_kiosk_autologin
+    setup_auto_updates
     start_and_test
     print_summary
 }
