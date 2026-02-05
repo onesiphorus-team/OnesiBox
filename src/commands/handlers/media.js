@@ -48,7 +48,8 @@ function isJwOrgUrl(url) {
  * Build local player URL for JW.org videos
  */
 function buildPlayerUrl(originalUrl, autoplay) {
-  const playerUrl = new URL('http://localhost:3000/player.html');
+  const port = process.env.PORT || 3000;
+  const playerUrl = new URL(`http://localhost:${port}/player.html`);
   playerUrl.searchParams.set('url', originalUrl);
   playerUrl.searchParams.set('autoplay', autoplay ? 'true' : 'false');
   return playerUrl.toString();

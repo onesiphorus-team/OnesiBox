@@ -1,10 +1,13 @@
 const { chromium } = require('playwright');
 const { spawn, execSync } = require('child_process');
+const path = require('path');
 const logger = require('../logging/logger');
 const { isUrlAllowed, isZoomUrl } = require('../commands/validator');
 
-const STANDBY_URL = 'http://localhost:3000';
-const LOCAL_URL_PREFIX = 'http://localhost:3000/';
+const LOCAL_PORT = process.env.PORT || 3000;
+const STANDBY_URL = `http://localhost:${LOCAL_PORT}`;
+const LOCAL_URL_PREFIX = `http://localhost:${LOCAL_PORT}/`;
+const DATA_DIR = process.env.ONESIBOX_DATA_DIR || '/opt/onesibox/data';
 
 // Find system Chromium executable
 function findChromiumPath() {
@@ -147,7 +150,7 @@ class BrowserController {
     }
 
     this.playwrightContext = await chromium.launchPersistentContext(
-      '/opt/onesibox/data/playwright-profile',
+      path.join(DATA_DIR, 'playwright-profile'),
       launchOptions
     );
 
@@ -170,7 +173,8 @@ class BrowserController {
     await this._killBrowserDirect();
     await this._delay(200);
 
-    const args = [...this.launchArgs, '--user-data-dir=/opt/onesibox/data/chromium', url];
+    const chromiumDataDir = path.join(DATA_DIR, 'chromium');
+    const args = [...this.launchArgs, `--user-data-dir=${chromiumDataDir}`, url];
 
     logger.info('Launching browser directly', { url });
 
@@ -216,7 +220,7 @@ class BrowserController {
     this.browserProcess = null;
 
     try {
-      execSync('pkill -f "chromium.*user-data-dir=/opt/onesibox"', { stdio: 'ignore' });
+      execSync(`pkill -f "chromium.*user-data-dir=${DATA_DIR}"`, { stdio: 'ignore' });
     } catch {
       // Ignore
     }

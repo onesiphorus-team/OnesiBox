@@ -105,7 +105,7 @@ async function closeBrowserContext() {
  * @param {object} browserController - The browser controller (for fallback navigation)
  */
 async function joinZoom(command, browserController) {
-  const { meeting_url, participant_name = 'Rosa Iannascoli' } = command.payload;
+  const { meeting_url, participant_name = 'OnesiBox User' } = command.payload;
 
   if (!isZoomUrl(meeting_url)) {
     throw new Error('Invalid Zoom URL');
