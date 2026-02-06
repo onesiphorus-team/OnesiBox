@@ -18,7 +18,9 @@ export default [
         setTimeout: 'readonly',
         setInterval: 'readonly',
         clearTimeout: 'readonly',
-        clearInterval: 'readonly'
+        clearInterval: 'readonly',
+        URL: 'readonly',
+        document: 'readonly'
       }
     },
     rules: {
