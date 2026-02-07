@@ -4,9 +4,12 @@ const logger = require('../../logging/logger');
 const { sanitizeLogContent } = require('../../logging/log-sanitizer');
 
 /**
- * Default log file path.
+ * Get today's log file path using the same naming pattern as winston-daily-rotate-file.
  */
-const DEFAULT_LOG_PATH = path.join(process.cwd(), 'logs', 'application.log');
+function getTodayLogPath() {
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  return path.join(process.cwd(), 'logs', `onesibox-${today}.log`);
+}
 
 /**
  * Maximum number of log lines that can be requested.
@@ -36,7 +39,7 @@ async function getLogs(command, _browserController) {
   });
 
   try {
-    const logPath = command.payload?.log_path || DEFAULT_LOG_PATH;
+    const logPath = command.payload?.log_path || getTodayLogPath();
 
     // Security check: only allow reading from logs directory
     const normalizedPath = path.normalize(logPath);
