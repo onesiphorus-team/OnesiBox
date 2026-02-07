@@ -24,7 +24,7 @@ WorkingDirectory=/opt/onesibox
 # ProtectHome=read-only to allow access to Playwright browser cache
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/onesibox /var/log/onesibox
+ReadWritePaths=/opt/onesibox /var/log/onesibox /home/admin/.onesibox-zoom /home/admin/.config/chromium /home/admin/.cache/ms-playwright
 PrivateTmp=true
 
 [Install]
