@@ -6,9 +6,9 @@ const { stateManager } = require('../../state/state-manager');
 const execFileAsync = promisify(execFile);
 
 /**
- * Set system volume using pactl/amixer with execFile (no shell).
+ * Set system volume using wpctl/pactl/amixer with execFile (no shell).
  * This is safer than exec() as it prevents command injection.
- * Tries multiple methods: pactl (PulseAudio), amixer with pulse, amixer direct.
+ * Tries multiple methods: wpctl (PipeWire), pactl (PulseAudio), amixer with pulse, amixer direct.
  * Also unmutes to ensure audio is not muted.
  * @param {number} level - Volume level 0-100
  * @returns {Promise<boolean>}
@@ -16,10 +16,21 @@ const execFileAsync = promisify(execFile);
 async function setSystemVolume(level) {
   const clampedLevel = Math.max(0, Math.min(100, level));
 
-  // Try pactl (PulseAudio) first - most reliable on modern systems
+  // Try wpctl (PipeWire/WirePlumber) first - default on modern Raspberry Pi OS
+  try {
+    const wpctlLevel = (clampedLevel / 100).toFixed(2);
+    await execFileAsync('wpctl', ['set-volume', '@DEFAULT_AUDIO_SINK@', wpctlLevel]);
+    await execFileAsync('wpctl', ['set-mute', '@DEFAULT_AUDIO_SINK@', '0']);
+    logger.debug('Volume set via wpctl', { level: clampedLevel });
+    return true;
+  } catch (error) {
+    logger.debug('wpctl failed, trying pactl', { error: error.message });
+  }
+
+  // Try pactl (PulseAudio)
   try {
     await execFileAsync('pactl', ['set-sink-volume', '@DEFAULT_SINK@', `${clampedLevel}%`]);
-    await execFileAsync('pactl', ['set-sink-mute', '@DEFAULT_SINK@', '0']); // Unmute
+    await execFileAsync('pactl', ['set-sink-mute', '@DEFAULT_SINK@', '0']);
     logger.debug('Volume set via pactl', { level: clampedLevel });
     return true;
   } catch (error) {
@@ -67,14 +78,24 @@ async function setVolume(command, _browserController) {
 }
 
 /**
- * Get current system volume using amixer with execFile (no shell).
- * Parses the output programmatically instead of using shell pipes.
+ * Get current system volume using wpctl/amixer with execFile (no shell).
  * @returns {Promise<number|null>}
  */
 async function getVolume() {
+  // Try wpctl first (PipeWire) - output format: "Volume: 0.51"
+  try {
+    const { stdout } = await execFileAsync('wpctl', ['get-volume', '@DEFAULT_AUDIO_SINK@']);
+    const match = stdout.match(/Volume:\s+([\d.]+)/);
+    if (match) {
+      return Math.round(parseFloat(match[1]) * 100);
+    }
+  } catch {
+    // fall through to amixer
+  }
+
+  // Fallback to amixer - output format: "[75%]"
   try {
     const { stdout } = await execFileAsync('amixer', ['get', 'Master']);
-    // Parse the output to find percentage value (e.g., "[75%]")
     const match = stdout.match(/\[(\d+)%\]/);
     return match ? parseInt(match[1], 10) : null;
   } catch {
