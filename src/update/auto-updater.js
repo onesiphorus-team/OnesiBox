@@ -8,7 +8,7 @@ const execFileAsync = promisify(execFile);
 
 // Default check interval: 5 minutes
 const DEFAULT_CHECK_INTERVAL_SECONDS = 5 * 60;
-const REPO_URL = 'git@github.com:onesiphorus-team/OnesiBox.git';
+const REPO_URL = 'https://github.com/onesiphorus-team/OnesiBox.git';
 const PROJECT_ROOT = path.join(__dirname, '../..');
 
 class AutoUpdater {
