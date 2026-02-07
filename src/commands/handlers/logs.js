@@ -7,7 +7,8 @@ const { sanitizeLogContent } = require('../../logging/log-sanitizer');
  * Get today's log file path using the same naming pattern as winston-daily-rotate-file.
  */
 function getTodayLogPath() {
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return path.join(process.cwd(), 'logs', `onesibox-${today}.log`);
 }
 
