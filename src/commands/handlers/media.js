@@ -4,6 +4,7 @@ const { isUrlAllowed } = require('../validator');
 const { leaveZoom, isZoomActive } = require('./zoom');
 
 let apiClient = null;
+let videoEndedCheckInterval = null;
 
 function setApiClient(client) {
   apiClient = client;
@@ -47,7 +48,8 @@ function isJwOrgUrl(url) {
  * Build local player URL for JW.org videos
  */
 function buildPlayerUrl(originalUrl, autoplay) {
-  const playerUrl = new URL('http://localhost:3000/player.html');
+  const port = process.env.PORT || 3000;
+  const playerUrl = new URL(`http://localhost:${port}/player.html`);
   playerUrl.searchParams.set('url', originalUrl);
   playerUrl.searchParams.set('autoplay', autoplay ? 'true' : 'false');
   return playerUrl.toString();
@@ -91,10 +93,81 @@ async function playMedia(command, browserController) {
     await browserController.pause();
     stateManager.setPaused(true);
   }
+
+  // Start video completion detection for video media
+  if (media_type === 'video') {
+    startVideoEndedDetection(browserController, { url, media_type });
+  }
+}
+
+/**
+ * Start polling to detect when a video has naturally ended.
+ * Injects a listener that sets window.__onesiboxVideoEnded = true,
+ * then polls every 2 seconds to check the flag.
+ */
+function startVideoEndedDetection(browserController, mediaInfo) {
+  stopVideoEndedDetection();
+
+  logger.info('Starting video ended detection');
+
+  // Give the page time to load and the video element to appear
+  setTimeout(async () => {
+    try {
+      await browserController.executeScript(`
+        window.__onesiboxVideoEnded = false;
+        var videos = document.querySelectorAll('video');
+        videos.forEach(function(v) {
+          v.addEventListener('ended', function() {
+            window.__onesiboxVideoEnded = true;
+          });
+        });
+      `);
+    } catch (error) {
+      logger.warn('Failed to inject video ended listener', { error: error.message });
+    }
+  }, 3000);
+
+  videoEndedCheckInterval = setInterval(async () => {
+    try {
+      const currentState = stateManager.getState();
+      if (currentState.status !== STATUS.PLAYING) {
+        stopVideoEndedDetection();
+        return;
+      }
+
+      const ended = await browserController.executeScript(`
+        return window.__onesiboxVideoEnded === true;
+      `);
+
+      if (ended) {
+        logger.info('Video ended naturally, reporting completion');
+        stopVideoEndedDetection();
+
+        stateManager.stopPlaying();
+        await browserController.goToStandby();
+        await reportPlaybackEvent('completed', mediaInfo);
+      }
+    } catch (error) {
+      logger.debug('Video ended check failed (page may have changed)', { error: error.message });
+      stopVideoEndedDetection();
+    }
+  }, 2000);
+}
+
+/**
+ * Stop the video ended detection polling.
+ */
+function stopVideoEndedDetection() {
+  if (videoEndedCheckInterval) {
+    clearInterval(videoEndedCheckInterval);
+    videoEndedCheckInterval = null;
+  }
 }
 
 async function stopMedia(command, browserController) {
   const currentState = stateManager.getState();
+
+  stopVideoEndedDetection();
 
   // Handle Zoom call interruption
   if (currentState.status === STATUS.CALLING || isZoomActive()) {
