@@ -25,6 +25,7 @@ class StateManager extends EventEmitter {
     this.volume = 80;
     this.isPaused = false;
     this.errorRecoveryTimer = null;
+    this.wsConnectionStatus = 'disconnected';
   }
 
   getState() {
@@ -35,7 +36,8 @@ class StateManager extends EventEmitter {
       currentMeeting: this.currentMeeting,
       lastHeartbeat: this.lastHeartbeat,
       volume: this.volume,
-      isPaused: this.isPaused
+      isPaused: this.isPaused,
+      wsConnectionStatus: this.wsConnectionStatus
     };
   }
 
@@ -113,6 +115,15 @@ class StateManager extends EventEmitter {
     this.volume = Math.max(0, Math.min(100, level));
     logger.info('Volume changed', { level: this.volume });
     this.emit('volumeChange', { level: this.volume });
+  }
+
+  setWsConnectionStatus(status) {
+    const oldStatus = this.wsConnectionStatus;
+    this.wsConnectionStatus = status;
+    if (oldStatus !== status) {
+      logger.info('WebSocket connection status changed', { from: oldStatus, to: status });
+      this.emit('wsConnectionStatusChange', { from: oldStatus, to: status });
+    }
   }
 
   updateHeartbeat() {
