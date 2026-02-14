@@ -7,7 +7,7 @@ const si = require('systeminformation');
 const logger = require('./logging/logger');
 const watchdog = require('./watchdog');
 const { loadConfig } = require('./config/config');
-const { stateManager, CONNECTION_STATUS } = require('./state/state-manager');
+const { stateManager, CONNECTION_STATUS, WS_CONNECTION_STATUS } = require('./state/state-manager');
 const ApiClient = require('./communication/api-client');
 const { WebSocketManager } = require('./communication/websocket-manager');
 const BrowserController = require('./browser/controller');
@@ -97,6 +97,8 @@ let commandManager;
 let pollingInterval;
 let heartbeatInterval;
 let originalPollingIntervalMs;
+let isPolling = false;
+let pollDebounceTimer = null;
 
 function serveStatic(req, res) {
   // Extract pathname without query string
@@ -296,6 +298,11 @@ function createServer() {
 }
 
 async function poll() {
+  if (isPolling) {
+    logger.debug('Poll already in progress, skipping');
+    return;
+  }
+  isPolling = true;
   try {
     const commands = await apiClient.getCommands();
     logger.debug('Poll response', { commandCount: commands.length });
@@ -311,7 +318,17 @@ async function poll() {
     } else {
       stateManager.setConnectionStatus(CONNECTION_STATUS.RECONNECTING);
     }
+  } finally {
+    isPolling = false;
   }
+}
+
+function debouncedPoll() {
+  if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
+  pollDebounceTimer = setTimeout(() => {
+    pollDebounceTimer = null;
+    poll();
+  }, 500);
 }
 
 function setPollingInterval(intervalMs) {
@@ -567,26 +584,26 @@ async function main() {
   if (config.websocket_enabled && config.reverb_key) {
     wsManager = new WebSocketManager(config);
 
-    wsManager.on('command-available', async () => {
+    wsManager.on('command-available', () => {
       logger.info('WebSocket: command available, triggering immediate poll');
-      await poll();
+      debouncedPoll();
     });
 
     wsManager.on('connected', () => {
-      stateManager.setWsConnectionStatus('connected');
-      const slowInterval = 30000;
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.CONNECTED);
+      const slowInterval = (config.ws_fallback_polling_seconds || 30) * 1000;
       logger.info('WebSocket connected, slowing polling', { intervalMs: slowInterval });
       setPollingInterval(slowInterval);
     });
 
     wsManager.on('disconnected', () => {
-      stateManager.setWsConnectionStatus('disconnected');
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.DISCONNECTED);
       logger.info('WebSocket disconnected, restoring polling', { intervalMs: originalPollingIntervalMs });
       setPollingInterval(originalPollingIntervalMs);
     });
 
     wsManager.on('reconnecting', () => {
-      stateManager.setWsConnectionStatus('reconnecting');
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.RECONNECTING);
     });
 
     wsManager.connect();

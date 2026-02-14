@@ -22,7 +22,8 @@ const ENV_OVERRIDES = {
   ONESIBOX_REVERB_KEY: 'reverb_key',
   ONESIBOX_REVERB_HOST: 'reverb_host',
   ONESIBOX_REVERB_PORT: 'reverb_port',
-  ONESIBOX_REVERB_SCHEME: 'reverb_scheme'
+  ONESIBOX_REVERB_SCHEME: 'reverb_scheme',
+  ONESIBOX_WS_FALLBACK_POLLING: 'ws_fallback_polling_seconds'
 };
 
 /**
@@ -35,7 +36,7 @@ function applyEnvOverrides(config) {
     const value = process.env[envVar];
     if (value !== undefined) {
       // Parse numeric values
-      if (['polling_interval_seconds', 'heartbeat_interval_seconds', 'default_volume', 'reverb_port'].includes(configKey)) {
+      if (['polling_interval_seconds', 'heartbeat_interval_seconds', 'default_volume', 'reverb_port', 'ws_fallback_polling_seconds'].includes(configKey)) {
         const numValue = parseInt(value, 10);
         if (!isNaN(numValue)) {
           config[configKey] = numValue;
@@ -145,7 +146,8 @@ function loadConfig() {
     reverb_key: config.reverb_key || null,
     reverb_host: config.reverb_host || defaultReverbHost,
     reverb_port: config.reverb_port ?? 8080,
-    reverb_scheme: config.reverb_scheme || 'http'
+    reverb_scheme: config.reverb_scheme || 'http',
+    ws_fallback_polling_seconds: config.ws_fallback_polling_seconds ?? 30
   };
 
   // Log config without sensitive token

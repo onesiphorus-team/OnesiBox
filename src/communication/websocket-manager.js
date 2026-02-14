@@ -18,6 +18,10 @@ class WebSocketManager extends EventEmitter {
   }
 
   connect() {
+    if (this.pusher) {
+      this.disconnect();
+    }
+
     const { reverb_key, reverb_host, reverb_port, reverb_scheme, server_url, appliance_token, appliance_id } = this.config;
 
     logger.info('WebSocket connecting', { host: reverb_host, port: reverb_port });

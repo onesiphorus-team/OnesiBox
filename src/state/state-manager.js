@@ -14,6 +14,12 @@ const CONNECTION_STATUS = {
   OFFLINE: 'offline'
 };
 
+const WS_CONNECTION_STATUS = {
+  CONNECTED: 'connected',
+  DISCONNECTED: 'disconnected',
+  RECONNECTING: 'reconnecting'
+};
+
 class StateManager extends EventEmitter {
   constructor() {
     super();
@@ -118,6 +124,9 @@ class StateManager extends EventEmitter {
   }
 
   setWsConnectionStatus(status) {
+    if (!Object.values(WS_CONNECTION_STATUS).includes(status)) {
+      throw new Error(`Invalid WS connection status: ${status}`);
+    }
     const oldStatus = this.wsConnectionStatus;
     this.wsConnectionStatus = status;
     if (oldStatus !== status) {
@@ -154,5 +163,6 @@ const stateManager = new StateManager();
 module.exports = {
   stateManager,
   STATUS,
-  CONNECTION_STATUS
+  CONNECTION_STATUS,
+  WS_CONNECTION_STATUS
 };
