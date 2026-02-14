@@ -52,7 +52,11 @@
 
     function showError(msg) {
       document.getElementById('container').innerHTML = `<div class="error">${msg}</div>`;
-      setTimeout(() => window.location.href = '/', 5000);
+      // Fallback: if backend polling doesn't consume the error flag within 60s,
+      // navigate to standby to self-heal
+      setTimeout(() => {
+        if (window.__onesiboxVideoError) window.location.href = '/';
+      }, 60000);
     }
 
     async function init() {
@@ -93,10 +97,11 @@
 
       const video = document.getElementById('player');
 
-      video.onended = () => window.location.href = '/';
+      video.onended = () => { window.__onesiboxVideoEnded = true; };
 
       video.onerror = (e) => {
         console.error('Video error:', video.error);
+        window.__onesiboxVideoError = true;
         showError('Errore video: ' + (video.error ? video.error.code : 'sconosciuto'));
       };
 

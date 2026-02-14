@@ -444,6 +444,11 @@ async function startHeartbeat() {
           position: state.currentMedia.position,
           duration: state.currentMedia.duration
         } : null,
+        current_meeting: state.currentMeeting ? {
+          meeting_id: state.currentMeeting.meeting_id,
+          meeting_url: state.currentMeeting.meeting_url,
+          joined_at: state.currentMeeting.joined_at
+        } : null,
         volume: state.volume,
         cpu_usage: Math.round(cpu.currentLoad),
         memory_usage: Math.round((mem.used / mem.total) * 100),
