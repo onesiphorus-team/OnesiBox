@@ -1,6 +1,6 @@
 {
   "server_url": "https://onesiforo.example.com",
-  "appliance_id": "550e8400-e29b-41d4-a716-446655440000",
+  "appliance_id": "1",
   "appliance_token": "your-appliance-token-here",
   "polling_interval_seconds": 5,
   "heartbeat_interval_seconds": 30,

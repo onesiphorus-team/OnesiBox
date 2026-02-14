@@ -57,8 +57,8 @@ function validateConfig(config) {
     errors.push('server_url must be a valid HTTPS URL (set via config or ONESIBOX_SERVER_URL env var)');
   }
 
-  if (!config.appliance_id || !UUID_REGEX.test(config.appliance_id)) {
-    errors.push('appliance_id must be a valid UUID (set via config or ONESIBOX_APPLIANCE_ID env var)');
+  if (!config.appliance_id || typeof config.appliance_id !== 'string') {
+    errors.push('appliance_id is required and must be a string (set via config or ONESIBOX_APPLIANCE_ID env var)');
   }
 
   if (!config.appliance_token || typeof config.appliance_token !== 'string') {
