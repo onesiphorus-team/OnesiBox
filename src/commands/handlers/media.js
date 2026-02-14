@@ -102,30 +102,17 @@ async function playMedia(command, browserController) {
 
 /**
  * Start polling to detect when a video has naturally ended.
- * Injects a listener that sets window.__onesiboxVideoEnded = true,
- * then polls every 2 seconds to check the flag.
+ * player.html sets window.__onesiboxVideoEnded = true on video end,
+ * and window.__onesiboxVideoError = true on video error.
+ * We poll every 2 seconds to check these flags.
  */
 function startVideoEndedDetection(browserController, mediaInfo) {
   stopVideoEndedDetection();
 
   logger.info('Starting video ended detection');
 
-  // Give the page time to load and the video element to appear
-  setTimeout(async () => {
-    try {
-      await browserController.executeScript(`
-        window.__onesiboxVideoEnded = false;
-        var videos = document.querySelectorAll('video');
-        videos.forEach(function(v) {
-          v.addEventListener('ended', function() {
-            window.__onesiboxVideoEnded = true;
-          });
-        });
-      `);
-    } catch (error) {
-      logger.warn('Failed to inject video ended listener', { error: error.message });
-    }
-  }, 3000);
+  const port = process.env.PORT || 3000;
+  const standbyUrls = [`http://localhost:${port}`, `http://localhost:${port}/`];
 
   videoEndedCheckInterval = setInterval(async () => {
     try {
@@ -135,21 +122,45 @@ function startVideoEndedDetection(browserController, mediaInfo) {
         return;
       }
 
-      const ended = await browserController.executeScript(`
-        return window.__onesiboxVideoEnded === true;
+      const result = await browserController.executeScript(`
+        return {
+          ended: window.__onesiboxVideoEnded === true,
+          error: window.__onesiboxVideoError === true,
+          url: window.location.href
+        };
       `);
 
-      if (ended) {
+      if (result && result.ended) {
         logger.info('Video ended naturally, reporting completion');
         stopVideoEndedDetection();
 
         stateManager.stopPlaying();
         await browserController.goToStandby();
         await reportPlaybackEvent('completed', mediaInfo);
+      } else if (result && result.error) {
+        logger.info('Video error detected, reporting completion and returning to standby');
+        stopVideoEndedDetection();
+
+        stateManager.stopPlaying();
+        await browserController.goToStandby();
+        await reportPlaybackEvent('completed', mediaInfo);
+      } else if (result && standbyUrls.includes(result.url)) {
+        logger.info('Page navigated to standby while still playing, treating as completed');
+        stopVideoEndedDetection();
+
+        stateManager.stopPlaying();
+        await reportPlaybackEvent('completed', mediaInfo);
       }
     } catch (error) {
       logger.debug('Video ended check failed (page may have changed)', { error: error.message });
       stopVideoEndedDetection();
+
+      const currentState = stateManager.getState();
+      if (currentState.status === STATUS.PLAYING) {
+        logger.info('Page changed while playing, treating as completed');
+        stateManager.stopPlaying();
+        await reportPlaybackEvent('completed', mediaInfo);
+      }
     }
   }, 2000);
 }
