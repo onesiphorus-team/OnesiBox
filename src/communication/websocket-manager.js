@@ -93,8 +93,8 @@ class WebSocketManager extends EventEmitter {
       this.emit('subscription-failed', error);
     });
 
-    // Event uses broadcastAs() → 'NewCommand', so bind with '.' prefix (no FQCN)
-    this.channel.bind('.NewCommand', (data) => {
+    // broadcastAs() → 'NewCommand'; raw pusher-js binds without dot prefix (unlike Echo)
+    this.channel.bind('NewCommand', (data) => {
       logger.info('New command event received', {
         uuid: data.uuid,
         type: data.type,
