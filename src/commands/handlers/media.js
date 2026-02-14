@@ -138,12 +138,12 @@ function startVideoEndedDetection(browserController, mediaInfo) {
         await browserController.goToStandby();
         await reportPlaybackEvent('completed', mediaInfo);
       } else if (result && result.error) {
-        logger.info('Video error detected, reporting completion and returning to standby');
+        logger.info('Video error detected, reporting error and returning to standby');
         stopVideoEndedDetection();
 
         stateManager.stopPlaying();
         await browserController.goToStandby();
-        await reportPlaybackEvent('completed', mediaInfo);
+        await reportPlaybackEvent('error', mediaInfo);
       } else if (result && standbyUrls.includes(result.url)) {
         logger.info('Page navigated to standby while still playing, treating as completed');
         stopVideoEndedDetection();
@@ -156,8 +156,9 @@ function startVideoEndedDetection(browserController, mediaInfo) {
       stopVideoEndedDetection();
 
       const currentState = stateManager.getState();
-      if (currentState.status === STATUS.PLAYING) {
-        logger.info('Page changed while playing, treating as completed');
+      if (currentState.status === STATUS.PLAYING &&
+          currentState.currentMedia?.url === mediaInfo.url) {
+        logger.info('Page changed while playing same media, treating as completed');
         stateManager.stopPlaying();
         await reportPlaybackEvent('completed', mediaInfo);
       }
