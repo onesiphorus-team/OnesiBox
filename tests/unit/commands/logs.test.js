@@ -52,12 +52,15 @@ describe('Logs Handler', () => {
 
       const result = await getLogs(command, mockBrowserController);
 
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
       expect(result).toMatchObject({
         lines: ['Line 3', 'Line 4', 'Line 5'],
         total_lines: 5,
         requested_lines: 3,
         returned_lines: 3,
-        log_file: 'application.log',
+        log_file: `onesibox-${today}.log`,
         timestamp: expect.any(String)
       });
     });
