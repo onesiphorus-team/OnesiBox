@@ -17,7 +17,13 @@ const ENV_OVERRIDES = {
   ONESIBOX_TOKEN: 'appliance_token',
   ONESIBOX_POLLING_INTERVAL: 'polling_interval_seconds',
   ONESIBOX_HEARTBEAT_INTERVAL: 'heartbeat_interval_seconds',
-  ONESIBOX_DEFAULT_VOLUME: 'default_volume'
+  ONESIBOX_DEFAULT_VOLUME: 'default_volume',
+  ONESIBOX_WS_ENABLED: 'websocket_enabled',
+  ONESIBOX_REVERB_KEY: 'reverb_key',
+  ONESIBOX_REVERB_HOST: 'reverb_host',
+  ONESIBOX_REVERB_PORT: 'reverb_port',
+  ONESIBOX_REVERB_SCHEME: 'reverb_scheme',
+  ONESIBOX_WS_FALLBACK_POLLING: 'ws_fallback_polling_seconds'
 };
 
 /**
@@ -30,11 +36,13 @@ function applyEnvOverrides(config) {
     const value = process.env[envVar];
     if (value !== undefined) {
       // Parse numeric values
-      if (['polling_interval_seconds', 'heartbeat_interval_seconds', 'default_volume'].includes(configKey)) {
+      if (['polling_interval_seconds', 'heartbeat_interval_seconds', 'default_volume', 'reverb_port', 'ws_fallback_polling_seconds'].includes(configKey)) {
         const numValue = parseInt(value, 10);
         if (!isNaN(numValue)) {
           config[configKey] = numValue;
         }
+      } else if (configKey === 'websocket_enabled') {
+        config[configKey] = value === 'true' || value === '1';
       } else {
         config[configKey] = value;
       }
@@ -81,6 +89,24 @@ function validateConfig(config) {
     }
   }
 
+  if (config.reverb_port !== undefined) {
+    if (typeof config.reverb_port !== 'number' || config.reverb_port < 1 || config.reverb_port > 65535) {
+      errors.push('reverb_port must be between 1 and 65535');
+    }
+  }
+
+  if (config.reverb_scheme !== undefined) {
+    if (!['http', 'https'].includes(config.reverb_scheme)) {
+      errors.push('reverb_scheme must be "http" or "https"');
+    }
+  }
+
+  if (config.ws_fallback_polling_seconds !== undefined) {
+    if (typeof config.ws_fallback_polling_seconds !== 'number' || config.ws_fallback_polling_seconds < 5) {
+      errors.push('ws_fallback_polling_seconds must be >= 5');
+    }
+  }
+
   return errors;
 }
 
@@ -108,6 +134,24 @@ function loadConfig() {
     throw new Error(`Configuration validation failed:\n  - ${errors.join('\n  - ')}`);
   }
 
+  // Derive default reverb_host from server_url if not set
+  let defaultReverbHost = null;
+  if (config.server_url) {
+    try {
+      defaultReverbHost = new URL(config.server_url).hostname;
+    } catch {
+      // ignore parse error, will remain null
+    }
+  }
+
+  let websocketEnabled = config.websocket_enabled ?? true;
+
+  // If WebSocket is enabled but reverb_key is missing, warn and disable
+  if (websocketEnabled && !config.reverb_key) {
+    logger.warn('WebSocket enabled but reverb_key is not set, disabling WebSocket');
+    websocketEnabled = false;
+  }
+
   const finalConfig = {
     server_url: config.server_url,
     appliance_id: config.appliance_id,
@@ -115,7 +159,13 @@ function loadConfig() {
     polling_interval_seconds: config.polling_interval_seconds ?? 5,
     heartbeat_interval_seconds: config.heartbeat_interval_seconds ?? 30,
     default_volume: config.default_volume ?? 80,
-    update_check_interval_seconds: config.update_check_interval_seconds ?? 1800 // 30 minutes
+    update_check_interval_seconds: config.update_check_interval_seconds ?? 1800, // 30 minutes
+    websocket_enabled: websocketEnabled,
+    reverb_key: config.reverb_key || null,
+    reverb_host: config.reverb_host || defaultReverbHost,
+    reverb_port: config.reverb_port ?? 8080,
+    reverb_scheme: config.reverb_scheme || 'http',
+    ws_fallback_polling_seconds: config.ws_fallback_polling_seconds ?? 30
   };
 
   // Log config without sensitive token
@@ -125,6 +175,9 @@ function loadConfig() {
     polling_interval_seconds: finalConfig.polling_interval_seconds,
     heartbeat_interval_seconds: finalConfig.heartbeat_interval_seconds,
     update_check_interval_seconds: finalConfig.update_check_interval_seconds,
+    websocket_enabled: finalConfig.websocket_enabled,
+    reverb_host: finalConfig.reverb_host,
+    reverb_port: finalConfig.reverb_port,
     token_source: process.env.ONESIBOX_TOKEN ? 'environment' : 'config_file'
   });
 

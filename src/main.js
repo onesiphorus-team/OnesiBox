@@ -7,8 +7,9 @@ const si = require('systeminformation');
 const logger = require('./logging/logger');
 const watchdog = require('./watchdog');
 const { loadConfig } = require('./config/config');
-const { stateManager, CONNECTION_STATUS } = require('./state/state-manager');
+const { stateManager, CONNECTION_STATUS, WS_CONNECTION_STATUS } = require('./state/state-manager');
 const ApiClient = require('./communication/api-client');
+const { WebSocketManager } = require('./communication/websocket-manager');
 const BrowserController = require('./browser/controller');
 const CommandManager = require('./commands/manager');
 const { getVolume } = require('./commands/handlers/volume');
@@ -90,10 +91,14 @@ function sendUnauthorized(res) {
 
 let config;
 let apiClient;
+let wsManager;
 let browserController;
 let commandManager;
 let pollingInterval;
 let heartbeatInterval;
+let originalPollingIntervalMs;
+let isPolling = false;
+let pollDebounceTimer = null;
 
 function serveStatic(req, res) {
   // Extract pathname without query string
@@ -292,28 +297,49 @@ function createServer() {
   });
 }
 
-async function startPolling() {
-  const poll = async () => {
-    try {
-      const commands = await apiClient.getCommands();
-      logger.debug('Poll response', { commandCount: commands.length });
-      if (commands.length > 0) {
-        logger.info('Received commands', { count: commands.length });
-        await commandManager.processCommands(commands);
-      }
-      stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
-    } catch (error) {
-      logger.error('Polling failed', { error: error.message });
-      if (apiClient.consecutiveFailures >= 3) {
-        stateManager.setConnectionStatus(CONNECTION_STATUS.OFFLINE);
-      } else {
-        stateManager.setConnectionStatus(CONNECTION_STATUS.RECONNECTING);
-      }
+async function poll() {
+  if (isPolling) {
+    logger.debug('Poll already in progress, skipping');
+    return;
+  }
+  isPolling = true;
+  try {
+    const commands = await apiClient.getCommands();
+    logger.debug('Poll response', { commandCount: commands.length });
+    if (commands.length > 0) {
+      logger.info('Received commands', { count: commands.length });
+      await commandManager.processCommands(commands);
     }
-  };
+    stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
+  } catch (error) {
+    logger.error('Polling failed', { error: error.message });
+    if (apiClient.consecutiveFailures >= 3) {
+      stateManager.setConnectionStatus(CONNECTION_STATUS.OFFLINE);
+    } else {
+      stateManager.setConnectionStatus(CONNECTION_STATUS.RECONNECTING);
+    }
+  } finally {
+    isPolling = false;
+  }
+}
 
+function debouncedPoll() {
+  if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
+  pollDebounceTimer = setTimeout(() => {
+    pollDebounceTimer = null;
+    poll();
+  }, 500);
+}
+
+function setPollingInterval(intervalMs) {
+  if (pollingInterval) clearInterval(pollingInterval);
+  pollingInterval = setInterval(poll, intervalMs);
+}
+
+async function startPolling() {
   await poll();
-  pollingInterval = setInterval(poll, config.polling_interval_seconds * 1000);
+  originalPollingIntervalMs = config.polling_interval_seconds * 1000;
+  setPollingInterval(originalPollingIntervalMs);
 }
 
 /**
@@ -486,6 +512,11 @@ async function shutdown(signal) {
 
   if (pollingInterval) clearInterval(pollingInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
+  if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
+
+  if (wsManager) {
+    wsManager.disconnect();
+  }
 
   // Cleanup Zoom resources first (if any)
   try {
@@ -549,6 +580,44 @@ async function main() {
 
   await startPolling();
   await startHeartbeat();
+
+  // Initialize WebSocket for real-time command notifications
+  if (config.websocket_enabled && config.reverb_key && config.reverb_host) {
+    wsManager = new WebSocketManager(config);
+
+    wsManager.on('command-available', () => {
+      logger.info('WebSocket: command available, triggering immediate poll');
+      debouncedPoll();
+    });
+
+    wsManager.on('connected', () => {
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.CONNECTED);
+      const slowInterval = config.ws_fallback_polling_seconds * 1000;
+      logger.info('WebSocket connected, slowing polling', { intervalMs: slowInterval });
+      setPollingInterval(slowInterval);
+    });
+
+    wsManager.on('disconnected', () => {
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.DISCONNECTED);
+      logger.info('WebSocket disconnected, restoring polling', { intervalMs: originalPollingIntervalMs });
+      setPollingInterval(originalPollingIntervalMs);
+    });
+
+    wsManager.on('reconnecting', () => {
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.RECONNECTING);
+    });
+
+    wsManager.on('subscription-failed', () => {
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.DISCONNECTED);
+      logger.warn('WebSocket subscription failed, restoring polling', { intervalMs: originalPollingIntervalMs });
+      setPollingInterval(originalPollingIntervalMs);
+    });
+
+    wsManager.connect();
+    logger.info('WebSocket manager initialized');
+  } else {
+    logger.info('WebSocket disabled or not fully configured, using polling only');
+  }
 
   stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
   logger.info('OnesiBox ready');

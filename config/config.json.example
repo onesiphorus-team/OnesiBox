@@ -4,5 +4,11 @@
   "appliance_token": "your-appliance-token-here",
   "polling_interval_seconds": 5,
   "heartbeat_interval_seconds": 30,
-  "default_volume": 80
+  "default_volume": 80,
+  "websocket_enabled": true,
+  "reverb_key": "your-reverb-app-key-here",
+  "reverb_host": "onesiforo.example.com",
+  "reverb_port": 8080,
+  "reverb_scheme": "http",
+  "ws_fallback_polling_seconds": 30
 }

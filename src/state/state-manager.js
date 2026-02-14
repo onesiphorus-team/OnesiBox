@@ -14,6 +14,12 @@ const CONNECTION_STATUS = {
   OFFLINE: 'offline'
 };
 
+const WS_CONNECTION_STATUS = {
+  CONNECTED: 'connected',
+  DISCONNECTED: 'disconnected',
+  RECONNECTING: 'reconnecting'
+};
+
 class StateManager extends EventEmitter {
   constructor() {
     super();
@@ -25,6 +31,7 @@ class StateManager extends EventEmitter {
     this.volume = 80;
     this.isPaused = false;
     this.errorRecoveryTimer = null;
+    this.wsConnectionStatus = 'disconnected';
   }
 
   getState() {
@@ -35,7 +42,8 @@ class StateManager extends EventEmitter {
       currentMeeting: this.currentMeeting,
       lastHeartbeat: this.lastHeartbeat,
       volume: this.volume,
-      isPaused: this.isPaused
+      isPaused: this.isPaused,
+      wsConnectionStatus: this.wsConnectionStatus
     };
   }
 
@@ -115,6 +123,18 @@ class StateManager extends EventEmitter {
     this.emit('volumeChange', { level: this.volume });
   }
 
+  setWsConnectionStatus(status) {
+    if (!Object.values(WS_CONNECTION_STATUS).includes(status)) {
+      throw new Error(`Invalid WS connection status: ${status}`);
+    }
+    const oldStatus = this.wsConnectionStatus;
+    this.wsConnectionStatus = status;
+    if (oldStatus !== status) {
+      logger.info('WebSocket connection status changed', { from: oldStatus, to: status });
+      this.emit('wsConnectionStatusChange', { from: oldStatus, to: status });
+    }
+  }
+
   updateHeartbeat() {
     this.lastHeartbeat = new Date().toISOString();
   }
@@ -143,5 +163,6 @@ const stateManager = new StateManager();
 module.exports = {
   stateManager,
   STATUS,
-  CONNECTION_STATUS
+  CONNECTION_STATUS,
+  WS_CONNECTION_STATUS
 };
