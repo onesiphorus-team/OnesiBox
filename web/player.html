@@ -52,6 +52,11 @@
 
     function showError(msg) {
       document.getElementById('container').innerHTML = `<div class="error">${msg}</div>`;
+      // Fallback: if backend polling doesn't consume the error flag within 60s,
+      // navigate to standby to self-heal
+      setTimeout(() => {
+        if (window.__onesiboxVideoError) window.location.href = '/';
+      }, 60000);
     }
 
     async function init() {
