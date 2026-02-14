@@ -90,6 +90,7 @@ class WebSocketManager extends EventEmitter {
 
     this.channel.bind('pusher:subscription_error', (error) => {
       logger.error('Channel subscription failed', { channel: channelName, error });
+      this.emit('subscription-failed', error);
     });
 
     // Event uses broadcastAs() → 'NewCommand', so bind with '.' prefix (no FQCN)

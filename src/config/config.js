@@ -89,6 +89,24 @@ function validateConfig(config) {
     }
   }
 
+  if (config.reverb_port !== undefined) {
+    if (typeof config.reverb_port !== 'number' || config.reverb_port < 1 || config.reverb_port > 65535) {
+      errors.push('reverb_port must be between 1 and 65535');
+    }
+  }
+
+  if (config.reverb_scheme !== undefined) {
+    if (!['http', 'https'].includes(config.reverb_scheme)) {
+      errors.push('reverb_scheme must be "http" or "https"');
+    }
+  }
+
+  if (config.ws_fallback_polling_seconds !== undefined) {
+    if (typeof config.ws_fallback_polling_seconds !== 'number' || config.ws_fallback_polling_seconds < 5) {
+      errors.push('ws_fallback_polling_seconds must be >= 5');
+    }
+  }
+
   return errors;
 }
 

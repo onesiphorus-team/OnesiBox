@@ -512,6 +512,7 @@ async function shutdown(signal) {
 
   if (pollingInterval) clearInterval(pollingInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
+  if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
 
   if (wsManager) {
     wsManager.disconnect();
@@ -581,7 +582,7 @@ async function main() {
   await startHeartbeat();
 
   // Initialize WebSocket for real-time command notifications
-  if (config.websocket_enabled && config.reverb_key) {
+  if (config.websocket_enabled && config.reverb_key && config.reverb_host) {
     wsManager = new WebSocketManager(config);
 
     wsManager.on('command-available', () => {
@@ -591,7 +592,7 @@ async function main() {
 
     wsManager.on('connected', () => {
       stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.CONNECTED);
-      const slowInterval = (config.ws_fallback_polling_seconds || 30) * 1000;
+      const slowInterval = config.ws_fallback_polling_seconds * 1000;
       logger.info('WebSocket connected, slowing polling', { intervalMs: slowInterval });
       setPollingInterval(slowInterval);
     });
@@ -606,10 +607,16 @@ async function main() {
       stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.RECONNECTING);
     });
 
+    wsManager.on('subscription-failed', () => {
+      stateManager.setWsConnectionStatus(WS_CONNECTION_STATUS.DISCONNECTED);
+      logger.warn('WebSocket subscription failed, restoring polling', { intervalMs: originalPollingIntervalMs });
+      setPollingInterval(originalPollingIntervalMs);
+    });
+
     wsManager.connect();
     logger.info('WebSocket manager initialized');
   } else {
-    logger.info('WebSocket disabled or reverb_key not configured, using polling only');
+    logger.info('WebSocket disabled or not fully configured, using polling only');
   }
 
   stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
