@@ -9,7 +9,7 @@ const { sanitizeLogContent } = require('../../logging/log-sanitizer');
 function getTodayLogPath() {
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  return path.join(process.cwd(), 'logs', `onesibox-${today}.log`);
+  return path.join(__dirname, '../../..', 'logs', `onesibox-${today}.log`);
 }
 
 /**
@@ -43,8 +43,8 @@ async function getLogs(command, _browserController) {
     const logPath = command.payload?.log_path || getTodayLogPath();
 
     // Security check: only allow reading from logs directory
-    const normalizedPath = path.normalize(logPath);
-    const logsDir = path.join(process.cwd(), 'logs');
+    const normalizedPath = path.resolve(logPath);
+    const logsDir = path.join(__dirname, '../../..', 'logs');
 
     if (!normalizedPath.startsWith(logsDir)) {
       throw new Error('Access denied: can only read from logs directory');
@@ -97,36 +97,8 @@ async function getLogs(command, _browserController) {
   }
 }
 
-/**
- * Read logs from a JSON Lines formatted file.
- * Each line is a valid JSON object.
- *
- * @param {string} logPath - Path to the log file
- * @param {number} lines - Number of lines to read
- * @returns {Promise<object[]>} Array of parsed log entries
- */
-async function readJsonLinesLog(logPath, lines) {
-  const content = await fs.readFile(logPath, 'utf-8');
-  const allLines = content.split('\n').filter(line => line.trim());
-  const lastLines = allLines.slice(-lines);
-
-  const entries = [];
-  for (const line of lastLines) {
-    try {
-      const entry = JSON.parse(line);
-      entries.push(entry);
-    } catch {
-      // If not valid JSON, treat as plain text
-      entries.push({ message: line, level: 'info' });
-    }
-  }
-
-  return entries;
-}
-
 module.exports = {
   getLogs,
-  readJsonLinesLog,
   MAX_LINES,
   DEFAULT_LINES
 };

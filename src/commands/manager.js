@@ -30,6 +30,7 @@ class CommandManager extends EventEmitter {
     this.browserController = browserController;
     this.handlers = new Map();
     this.processing = false;
+    this.pendingBatches = [];
   }
 
   registerHandler(commandType, handler) {
@@ -100,7 +101,8 @@ class CommandManager extends EventEmitter {
 
   async processCommands(commands) {
     if (this.processing) {
-      logger.warn('Already processing commands, skipping batch');
+      logger.warn('Already processing commands, queuing batch');
+      this.pendingBatches.push(commands);
       return;
     }
 
@@ -117,7 +119,13 @@ class CommandManager extends EventEmitter {
         await this.processCommand(command);
       }
     } finally {
-      this.processing = false;
+      if (this.pendingBatches.length > 0) {
+        const nextBatch = this.pendingBatches.shift();
+        this.processing = false;
+        await this.processCommands(nextBatch);
+      } else {
+        this.processing = false;
+      }
     }
   }
 

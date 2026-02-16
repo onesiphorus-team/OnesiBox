@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const si = require('systeminformation');
@@ -74,7 +75,13 @@ function isApiAuthenticated(req) {
   }
 
   const providedKey = req.headers['x-api-key'];
-  return providedKey === LOCAL_API_KEY;
+  if (!providedKey || typeof providedKey !== 'string') {
+    return false;
+  }
+  if (providedKey.length !== LOCAL_API_KEY.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(providedKey), Buffer.from(LOCAL_API_KEY));
 }
 
 /**
@@ -161,6 +168,7 @@ async function getAppVersion() {
     logger.debug('Version from package.json', { version: cachedVersion });
     return cachedVersion;
   } catch {
+    cachedVersion = 'unknown';
     return 'unknown';
   }
 }
@@ -244,7 +252,7 @@ async function handleJwMediaProxy(req, res) {
   try {
     const https = require('https');
     const fetchPromise = new Promise((resolve, reject) => {
-      https.get(apiUrl, (response) => {
+      const req = https.get(apiUrl, { timeout: 10000 }, (response) => {
         let data = '';
         response.on('data', chunk => data += chunk);
         response.on('end', () => {
@@ -254,7 +262,9 @@ async function handleJwMediaProxy(req, res) {
             reject(new Error(`API returned ${response.statusCode}`));
           }
         });
-      }).on('error', reject);
+      });
+      req.on('timeout', () => { req.destroy(); });
+      req.on('error', reject);
     });
 
     const data = await fetchPromise;
@@ -521,6 +531,14 @@ async function shutdown(signal) {
 
   if (wsManager) {
     wsManager.disconnect();
+  }
+
+  // Stop video ended detection polling
+  try {
+    const mediaHandler = require('./commands/handlers/media');
+    mediaHandler.stopVideoEndedDetection();
+  } catch {
+    // Ignore media cleanup errors during shutdown
   }
 
   // Cleanup Zoom resources first (if any)

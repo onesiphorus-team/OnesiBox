@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
-const { spawn, execSync } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const logger = require('../logging/logger');
 const { isUrlAllowed, isZoomUrl } = require('../commands/validator');
@@ -13,7 +14,7 @@ const DATA_DIR = process.env.ONESIBOX_DATA_DIR || '/opt/onesibox/data';
 function findChromiumPath() {
   if (process.env.CHROMIUM_BIN) {
     try {
-      execSync(`test -x ${process.env.CHROMIUM_BIN}`, { stdio: 'ignore' });
+      fs.accessSync(process.env.CHROMIUM_BIN, fs.constants.X_OK);
       return process.env.CHROMIUM_BIN;
     } catch {
       // Env var set but path invalid, continue to fallbacks
@@ -30,7 +31,7 @@ function findChromiumPath() {
 
   for (const p of paths) {
     try {
-      execSync(`test -x ${p}`, { stdio: 'ignore' });
+      fs.accessSync(p, fs.constants.X_OK);
       return p;
     } catch {
       continue;
@@ -220,7 +221,7 @@ class BrowserController {
     this.browserProcess = null;
 
     try {
-      execSync(`pkill -f "chromium.*user-data-dir=${DATA_DIR}"`, { stdio: 'ignore' });
+      execFileSync('pkill', ['-f', `chromium.*user-data-dir=${DATA_DIR}`], { stdio: 'ignore' });
     } catch {
       // Ignore
     }
@@ -307,7 +308,7 @@ class BrowserController {
   /**
    * Execute a JavaScript snippet in the browser (Playwright mode only)
    */
-  async executeScript(script) {
+  async _executeScript(script) {
     if (!this.usePlaywright || !this.page) {
       logger.warn('Script execution not available in spawn mode');
       return null;
