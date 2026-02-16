@@ -1,5 +1,12 @@
+const http = require('http');
+const https = require('https');
 const axios = require('axios');
 const logger = require('../logging/logger');
+
+// Disable keep-alive to prevent stale connection reuse behind Cloudflare.
+// Node.js 20 defaults to keepAlive:true; stale pooled connections cause 10s hangs.
+const httpAgent = new http.Agent({ keepAlive: false });
+const httpsAgent = new https.Agent({ keepAlive: false });
 
 const BACKOFF_SCHEDULE = [5000, 10000, 20000, 60000];
 
@@ -13,6 +20,8 @@ class ApiClient {
     this.client = axios.create({
       baseURL: `${config.server_url}/api/v1`,
       timeout: 10000,
+      httpAgent,
+      httpsAgent,
       headers: {
         'Authorization': `Bearer ${config.appliance_token}`,
         'Content-Type': 'application/json',
