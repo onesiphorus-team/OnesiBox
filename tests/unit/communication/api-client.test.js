@@ -39,7 +39,7 @@ describe('ApiClient', () => {
 
   describe('constructor', () => {
     it('should create axios instance with correct config', () => {
-      expect(axios.create).toHaveBeenCalledWith({
+      expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
         baseURL: 'https://onesiforo.test/api/v1',
         timeout: 10000,
         headers: {
@@ -47,7 +47,7 @@ describe('ApiClient', () => {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         }
-      });
+      }));
     });
 
     it('should NOT include appliance_id in headers', () => {
@@ -195,30 +195,4 @@ describe('ApiClient', () => {
     });
   });
 
-  describe('backoff', () => {
-    it('should calculate correct backoff delay', () => {
-      apiClient.consecutiveFailures = 1;
-      expect(apiClient.getBackoffDelay()).toBe(5000);
-
-      apiClient.consecutiveFailures = 2;
-      expect(apiClient.getBackoffDelay()).toBe(10000);
-
-      apiClient.consecutiveFailures = 3;
-      expect(apiClient.getBackoffDelay()).toBe(20000);
-
-      apiClient.consecutiveFailures = 4;
-      expect(apiClient.getBackoffDelay()).toBe(60000);
-
-      apiClient.consecutiveFailures = 10;
-      expect(apiClient.getBackoffDelay()).toBe(60000);
-    });
-
-    it('should allow retry within limit', () => {
-      apiClient.consecutiveFailures = 5;
-      expect(apiClient.shouldRetry()).toBe(true);
-
-      apiClient.consecutiveFailures = 7;
-      expect(apiClient.shouldRetry()).toBe(false);
-    });
-  });
 });

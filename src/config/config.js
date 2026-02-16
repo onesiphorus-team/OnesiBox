@@ -4,7 +4,6 @@ const logger = require('../logging/logger');
 
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, '../../config/config.json');
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_REGEX = /^https:\/\/.+/;
 
 /**

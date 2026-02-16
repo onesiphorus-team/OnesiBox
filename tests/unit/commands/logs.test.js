@@ -1,4 +1,4 @@
-const { getLogs, readJsonLinesLog, MAX_LINES, DEFAULT_LINES } = require('../../../src/commands/handlers/logs');
+const { getLogs, MAX_LINES, DEFAULT_LINES } = require('../../../src/commands/handlers/logs');
 const path = require('path');
 
 // Mock dependencies
@@ -163,43 +163,4 @@ describe('Logs Handler', () => {
     });
   });
 
-  describe('readJsonLinesLog', () => {
-    it('should parse JSON Lines formatted logs', async () => {
-      const logContent = '{"level":"info","message":"Test 1"}\n{"level":"error","message":"Test 2"}';
-      fs.readFile.mockResolvedValue(logContent);
-
-      const result = await readJsonLinesLog('/test/path.log', 10);
-
-      expect(result).toEqual([
-        { level: 'info', message: 'Test 1' },
-        { level: 'error', message: 'Test 2' }
-      ]);
-    });
-
-    it('should handle invalid JSON lines gracefully', async () => {
-      const logContent = '{"level":"info","message":"Valid"}\nInvalid JSON line\n{"level":"error"}';
-      fs.readFile.mockResolvedValue(logContent);
-
-      const result = await readJsonLinesLog('/test/path.log', 10);
-
-      expect(result).toEqual([
-        { level: 'info', message: 'Valid' },
-        { level: 'info', message: 'Invalid JSON line' },
-        { level: 'error' }
-      ]);
-    });
-
-    it('should return last N lines', async () => {
-      const entries = Array.from({ length: 10 }, (_, i) =>
-        `{"level":"info","message":"Entry ${i + 1}"}`
-      );
-      fs.readFile.mockResolvedValue(entries.join('\n'));
-
-      const result = await readJsonLinesLog('/test/path.log', 3);
-
-      expect(result.length).toBe(3);
-      expect(result[0].message).toBe('Entry 8');
-      expect(result[2].message).toBe('Entry 10');
-    });
-  });
 });

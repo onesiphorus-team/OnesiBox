@@ -122,7 +122,7 @@ function startVideoEndedDetection(browserController, mediaInfo) {
         return;
       }
 
-      const result = await browserController.executeScript(`
+      const result = await browserController._executeScript(`
         return {
           ended: window.__onesiboxVideoEnded === true,
           error: window.__onesiboxVideoError === true,
@@ -249,5 +249,6 @@ module.exports = {
   pauseMedia,
   resumeMedia,
   setApiClient,
-  reportPlaybackEvent
+  reportPlaybackEvent,
+  stopVideoEndedDetection
 };

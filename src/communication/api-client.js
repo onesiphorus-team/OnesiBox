@@ -8,8 +8,6 @@ const logger = require('../logging/logger');
 const httpAgent = new http.Agent({ keepAlive: false });
 const httpsAgent = new https.Agent({ keepAlive: false });
 
-const BACKOFF_SCHEDULE = [5000, 10000, 20000, 60000];
-
 class ApiClient {
   constructor(config) {
     this.config = config;
@@ -45,15 +43,6 @@ class ApiClient {
         return Promise.reject(error);
       }
     );
-  }
-
-  getBackoffDelay() {
-    const index = Math.min(this.consecutiveFailures - 1, BACKOFF_SCHEDULE.length - 1);
-    return BACKOFF_SCHEDULE[Math.max(0, index)];
-  }
-
-  shouldRetry() {
-    return this.consecutiveFailures < BACKOFF_SCHEDULE.length + 3;
   }
 
   /**

@@ -120,6 +120,10 @@ class WebSocketManager extends EventEmitter {
   disconnect() {
     if (this.pusher) {
       logger.info('WebSocket disconnecting');
+      if (this.channel) {
+        this.channel.unbind_all();
+      }
+      this.pusher.connection.unbind_all();
       this.pusher.disconnect();
       this.pusher = null;
       this.channel = null;
