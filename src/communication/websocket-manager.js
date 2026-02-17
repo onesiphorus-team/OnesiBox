@@ -98,7 +98,8 @@ class WebSocketManager extends EventEmitter {
       logger.info('New command event received', {
         uuid: data.uuid,
         type: data.type,
-        priority: data.priority
+        priority: data.priority,
+        hasPayload: data.payload !== undefined
       });
       this.emit('command-available', data);
     });

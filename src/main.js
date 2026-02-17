@@ -608,9 +608,23 @@ async function main() {
   if (config.websocket_enabled && config.reverb_key && config.reverb_host) {
     wsManager = new WebSocketManager(config);
 
-    wsManager.on('command-available', () => {
-      logger.info('WebSocket: command available, triggering immediate poll');
-      debouncedPoll();
+    wsManager.on('command-available', (data) => {
+      if (data && data.uuid && data.type && data.payload !== undefined) {
+        logger.info('WebSocket: executing command directly from event', {
+          uuid: data.uuid,
+          type: data.type
+        });
+        const command = {
+          id: data.uuid,
+          type: data.type,
+          payload: data.payload || {},
+          expires_at: data.expires_at || null
+        };
+        commandManager.processCommand(command);
+      } else {
+        logger.info('WebSocket: command available (no payload), triggering poll');
+        debouncedPoll();
+      }
     });
 
     wsManager.on('connected', () => {
