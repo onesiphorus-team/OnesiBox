@@ -4,7 +4,8 @@ const { isUrlAllowed } = require('../validator');
 const { leaveZoom, isZoomActive } = require('./zoom');
 
 let apiClient = null;
-let videoEndedCheckInterval = null;
+let videoEndedCheckTimer = null;
+let isHandlingVideoEnd = false;
 
 function setApiClient(client) {
   apiClient = client;
@@ -27,6 +28,9 @@ async function reportPlaybackEvent(event, mediaInfo = null) {
       payload.media_type = mediaInfo.media_type;
       payload.position = mediaInfo.position || 0;
       payload.duration = mediaInfo.duration;
+      if (mediaInfo.session_id) {
+        payload.session_id = mediaInfo.session_id;
+      }
     }
 
     await apiClient.reportPlaybackEvent(payload);
@@ -56,7 +60,7 @@ function buildPlayerUrl(originalUrl, autoplay) {
 }
 
 async function playMedia(command, browserController) {
-  const { url, media_type, autoplay = true, start_position = 0 } = command.payload;
+  const { url, media_type, autoplay = true, start_position = 0, session_id = null } = command.payload;
 
   if (!isUrlAllowed(url)) {
     throw new Error('URL not in authorized domain whitelist');
@@ -87,7 +91,9 @@ async function playMedia(command, browserController) {
     media_type
   });
 
-  await reportPlaybackEvent('started', { url, media_type, position: start_position });
+  const mediaInfo = { url, media_type, session_id };
+
+  await reportPlaybackEvent('started', { ...mediaInfo, position: start_position });
 
   if (!autoplay) {
     await browserController.pause();
@@ -96,7 +102,7 @@ async function playMedia(command, browserController) {
 
   // Start video completion detection for video media
   if (media_type === 'video') {
-    startVideoEndedDetection(browserController, { url, media_type });
+    startVideoEndedDetection(browserController, mediaInfo);
   }
 }
 
@@ -104,17 +110,30 @@ async function playMedia(command, browserController) {
  * Start polling to detect when a video has naturally ended.
  * player.html sets window.__onesiboxVideoEnded = true on video end,
  * and window.__onesiboxVideoError = true on video error.
- * We poll every 2 seconds to check these flags.
+ * Uses chained setTimeout (not setInterval) to prevent overlapping
+ * async callbacks from causing double event reports.
  */
 function startVideoEndedDetection(browserController, mediaInfo) {
   stopVideoEndedDetection();
+  isHandlingVideoEnd = false;
 
   logger.info('Starting video ended detection');
 
   const port = process.env.PORT || 3000;
   const standbyUrls = [`http://localhost:${port}`, `http://localhost:${port}/`];
 
-  videoEndedCheckInterval = setInterval(async () => {
+  async function scheduleNextCheck() {
+    if (videoEndedCheckTimer === null) {
+      return;
+    }
+    videoEndedCheckTimer = setTimeout(() => checkVideoEnded(), 2000);
+  }
+
+  async function checkVideoEnded() {
+    if (isHandlingVideoEnd) {
+      return;
+    }
+
     try {
       const currentState = stateManager.getState();
       if (currentState.status !== STATUS.PLAYING) {
@@ -132,24 +151,22 @@ function startVideoEndedDetection(browserController, mediaInfo) {
 
       if (result && result.ended) {
         logger.info('Video ended naturally, reporting completion');
+        isHandlingVideoEnd = true;
         stopVideoEndedDetection();
-
-        stateManager.stopPlaying();
-        await browserController.goToStandby();
-        await reportPlaybackEvent('completed', mediaInfo);
+        await handleVideoEnd(browserController, mediaInfo, 'completed');
       } else if (result && result.error) {
         logger.info('Video error detected, reporting error and returning to standby');
+        isHandlingVideoEnd = true;
         stopVideoEndedDetection();
-
-        stateManager.stopPlaying();
-        await browserController.goToStandby();
-        await reportPlaybackEvent('error', mediaInfo);
+        await handleVideoEnd(browserController, mediaInfo, 'error');
       } else if (result && standbyUrls.includes(result.url)) {
         logger.info('Page navigated to standby while still playing, treating as completed');
+        isHandlingVideoEnd = true;
         stopVideoEndedDetection();
-
         stateManager.stopPlaying();
         await reportPlaybackEvent('completed', mediaInfo);
+      } else {
+        await scheduleNextCheck();
       }
     } catch (error) {
       logger.debug('Video ended check failed (page may have changed)', { error: error.message });
@@ -163,16 +180,35 @@ function startVideoEndedDetection(browserController, mediaInfo) {
         await reportPlaybackEvent('completed', mediaInfo);
       }
     }
-  }, 2000);
+  }
+
+  // Use a non-null sentinel so stopVideoEndedDetection can clear it
+  videoEndedCheckTimer = setTimeout(() => checkVideoEnded(), 2000);
+}
+
+/**
+ * Handle video end/error: go to standby and report the event.
+ * Always reports the event even if goToStandby() fails.
+ */
+async function handleVideoEnd(browserController, mediaInfo, event) {
+  stateManager.stopPlaying();
+
+  try {
+    await browserController.goToStandby();
+  } catch (error) {
+    logger.warn('Failed to go to standby after video end, reporting event anyway', { error: error.message });
+  }
+
+  await reportPlaybackEvent(event, mediaInfo);
 }
 
 /**
  * Stop the video ended detection polling.
  */
 function stopVideoEndedDetection() {
-  if (videoEndedCheckInterval) {
-    clearInterval(videoEndedCheckInterval);
-    videoEndedCheckInterval = null;
+  if (videoEndedCheckTimer) {
+    clearTimeout(videoEndedCheckTimer);
+    videoEndedCheckTimer = null;
   }
 }
 
