@@ -14,6 +14,7 @@ const { WebSocketManager } = require('./communication/websocket-manager');
 const BrowserController = require('./browser/controller');
 const CommandManager = require('./commands/manager');
 const { getVolume } = require('./commands/handlers/volume');
+const { getNetworkInfo, getDetailedMemory } = require('./utils/network-info');
 
 const execFileAsync = promisify(execFile);
 
@@ -312,6 +313,21 @@ async function poll() {
     logger.debug('Poll already in progress, skipping');
     return;
   }
+
+  // Respect auth failure and rate limit backoff
+  const throttle = apiClient.getThrottleStatus();
+  if (throttle.shouldSkip) {
+    if (throttle.reason === 'auth_failed') {
+      logger.debug('Skipping poll - auth failed (dormant state)');
+      stateManager.setConnectionStatus(CONNECTION_STATUS.OFFLINE);
+      return;
+    }
+    if (throttle.reason === 'rate_limited') {
+      logger.debug('Skipping poll - rate limit backoff', { backoffMs: throttle.backoffMs });
+      return;
+    }
+  }
+
   isPolling = true;
   try {
     const commands = await apiClient.getCommands();
@@ -321,6 +337,9 @@ async function poll() {
       await commandManager.processCommands(commands);
     }
     stateManager.setConnectionStatus(CONNECTION_STATUS.CONNECTED);
+
+    // Drain pending ACK retry queue on successful connection
+    await apiClient.retryPendingAcks();
   } catch (error) {
     logger.error('Polling failed', { error: error.message });
     if (apiClient.consecutiveFailures >= 3) {
@@ -352,84 +371,7 @@ async function startPolling() {
   setPollingInterval(originalPollingIntervalMs);
 }
 
-/**
- * Get network information for heartbeat.
- * Identifies connection type, interface details, and WiFi info if applicable.
- */
-async function getNetworkInfo() {
-  try {
-    const [networkInterfaces, wifiConnections, defaultGateway] = await Promise.all([
-      si.networkInterfaces(),
-      si.wifiConnections(),
-      si.networkGatewayDefault()
-    ]);
-
-    // Find the active interface (prefer non-internal, has IP, is up)
-    const activeInterface = networkInterfaces.find(iface =>
-      iface.operstate === 'up' && !iface.internal && iface.ip4 &&
-      !iface.iface.startsWith('docker') && !iface.iface.startsWith('br-') &&
-      !iface.iface.startsWith('veth')
-    );
-
-    if (!activeInterface) {
-      return { network: null, wifi: null };
-    }
-
-    // Determine network type based on interface name
-    const isWifi = activeInterface.iface.startsWith('wlan') ||
-                   activeInterface.iface.startsWith('wl') ||
-                   activeInterface.type === 'wireless';
-
-    const network = {
-      type: isWifi ? 'wifi' : 'ethernet',
-      interface: activeInterface.iface,
-      ip: activeInterface.ip4,
-      netmask: activeInterface.ip4subnet || null,
-      gateway: defaultGateway || null,
-      mac: activeInterface.mac || null,
-      dns: activeInterface.dnsSuffix ? [activeInterface.dnsSuffix] : []
-    };
-
-    // Add WiFi-specific info if applicable
-    let wifi = null;
-    if (isWifi && wifiConnections && wifiConnections.length > 0) {
-      const wifiConn = wifiConnections[0];
-      // Convert dBm to percentage (typical range: -100 dBm to -30 dBm)
-      const signalDbm = wifiConn.signalLevel || -100;
-      const signalPercent = Math.min(100, Math.max(0, 2 * (signalDbm + 100)));
-
-      wifi = {
-        ssid: wifiConn.ssid || null,
-        signal_dbm: signalDbm,
-        signal_percent: Math.round(signalPercent),
-        channel: wifiConn.channel || null,
-        frequency: wifiConn.frequency || null,
-        security: wifiConn.security || null
-      };
-    }
-
-    return { network, wifi };
-  } catch (error) {
-    logger.debug('Failed to get network info', { error: error.message });
-    return { network: null, wifi: null };
-  }
-}
-
-/**
- * Get detailed memory information for heartbeat.
- * Returns breakdown similar to `free -h` command.
- */
-async function getDetailedMemory(mem) {
-  return {
-    total: mem.total,
-    used: mem.used,
-    free: mem.free,
-    available: mem.available,
-    buffers: mem.buffers,
-    cached: mem.cached,
-    percent: Math.round((mem.used / mem.total) * 100)
-  };
-}
+// Network info and detailed memory are now in src/utils/network-info.js
 
 async function startHeartbeat() {
   const sendHeartbeat = async () => {

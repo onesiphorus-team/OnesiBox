@@ -13,6 +13,24 @@ class ApiClient {
     this.config = config;
     this.consecutiveFailures = 0;
 
+    /**
+     * Whether the client detected an unrecoverable auth failure (401/403).
+     * When true, polling should stop to avoid flooding the server.
+     */
+    this.authFailed = false;
+
+    /**
+     * Current backoff delay in ms (used for 429 rate limit responses).
+     * Resets to 0 on successful requests.
+     */
+    this.backoffMs = 0;
+
+    /**
+     * Queue of failed ACKs to retry on next successful connection.
+     * Each entry: { commandId, ack, retries }
+     */
+    this.pendingAcks = [];
+
     // The backend identifies the appliance via the Sanctum token,
     // so we don't need to include the appliance ID in the URL
     this.client = axios.create({
@@ -30,13 +48,34 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => {
         this.consecutiveFailures = 0;
+        this.backoffMs = 0;
+        if (this.authFailed) {
+          logger.info('Auth recovered, resuming normal operation');
+          this.authFailed = false;
+        }
         return response;
       },
       (error) => {
+        const status = error.response?.status;
+
+        if (status === 401 || status === 403) {
+          if (!this.authFailed) {
+            logger.error('Authentication/authorization failure - entering dormant state', {
+              status,
+              message: error.response?.data?.message || error.message
+            });
+            this.authFailed = true;
+          }
+        } else if (status === 429) {
+          // Exponential backoff: 2s, 4s, 8s, 16s, max 60s
+          this.backoffMs = Math.min(60000, Math.max(2000, this.backoffMs * 2 || 2000));
+          logger.warn('Rate limited (429), backing off', { backoffMs: this.backoffMs });
+        }
+
         this.consecutiveFailures++;
         logger.error('API request failed', {
           url: error.config?.url,
-          status: error.response?.status,
+          status,
           message: error.message,
           consecutiveFailures: this.consecutiveFailures
         });
@@ -88,6 +127,87 @@ class ApiClient {
    */
   async reportPlaybackEvent(event) {
     await this.client.post('/appliances/playback', event);
+  }
+
+  /**
+   * Queue a failed ACK for retry on next successful connection.
+   * Maximum 50 pending ACKs, oldest are dropped if exceeded.
+   *
+   * @param {string} commandId - Command UUID
+   * @param {object} ack - ACK payload
+   */
+  queueAckRetry(commandId, ack) {
+    const MAX_PENDING_ACKS = 50;
+    const MAX_RETRIES = 3;
+
+    // Don't queue if already pending
+    if (this.pendingAcks.some(p => p.commandId === commandId)) {
+      return;
+    }
+
+    this.pendingAcks.push({ commandId, ack, retries: 0, maxRetries: MAX_RETRIES });
+
+    if (this.pendingAcks.length > MAX_PENDING_ACKS) {
+      const dropped = this.pendingAcks.shift();
+      logger.warn('Dropped oldest pending ACK due to queue overflow', {
+        commandId: dropped.commandId
+      });
+    }
+
+    logger.info('Queued ACK for retry', {
+      commandId,
+      pendingCount: this.pendingAcks.length
+    });
+  }
+
+  /**
+   * Retry sending any queued ACKs.
+   * Called after each successful poll to drain the retry queue.
+   */
+  async retryPendingAcks() {
+    if (this.pendingAcks.length === 0) {
+      return;
+    }
+
+    const toRetry = [...this.pendingAcks];
+    this.pendingAcks = [];
+
+    for (const pending of toRetry) {
+      try {
+        await this.acknowledgeCommand(pending.commandId, pending.ack);
+        logger.info('Retried ACK successfully', { commandId: pending.commandId });
+      } catch (error) {
+        pending.retries++;
+        if (pending.retries < pending.maxRetries) {
+          this.pendingAcks.push(pending);
+          logger.warn('ACK retry failed, will retry again', {
+            commandId: pending.commandId,
+            retries: pending.retries,
+            maxRetries: pending.maxRetries
+          });
+        } else {
+          logger.error('ACK retry exhausted, dropping', {
+            commandId: pending.commandId,
+            retries: pending.retries
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Check if the client should skip requests due to auth failure or rate limit backoff.
+   *
+   * @returns {{ shouldSkip: boolean, reason: string|null }}
+   */
+  getThrottleStatus() {
+    if (this.authFailed) {
+      return { shouldSkip: true, reason: 'auth_failed' };
+    }
+    if (this.backoffMs > 0) {
+      return { shouldSkip: true, reason: 'rate_limited', backoffMs: this.backoffMs };
+    }
+    return { shouldSkip: false, reason: null };
   }
 }
 

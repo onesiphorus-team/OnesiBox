@@ -133,10 +133,11 @@ class CommandManager extends EventEmitter {
     try {
       await this.apiClient.acknowledgeCommand(commandId, ack);
     } catch (error) {
-      logger.error('Failed to send command acknowledgment', {
+      logger.error('Failed to send command acknowledgment, queuing for retry', {
         commandId,
         error: error.message
       });
+      this.apiClient.queueAckRetry(commandId, ack);
     }
   }
 }
