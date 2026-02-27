@@ -132,11 +132,9 @@ class CommandManager extends EventEmitter {
   async _sendAck(commandId, ack) {
     try {
       await this.apiClient.acknowledgeCommand(commandId, ack);
-      logger.info('Command acknowledged', { commandId, status: ack.status });
     } catch (error) {
-      logger.error('Failed to send ACK, queuing for retry', {
+      logger.error('Failed to send command acknowledgment, queuing for retry', {
         commandId,
-        status: ack.status,
         error: error.message
       });
       this.apiClient.queueAckRetry(commandId, ack);

@@ -34,7 +34,7 @@ async function reportPlaybackEvent(event, mediaInfo = null) {
     }
 
     await apiClient.reportPlaybackEvent(payload);
-    logger.info('Playback event reported', { event, media_url: payload.media_url, session_id: payload.session_id || null });
+    logger.debug('Playback event reported', { event });
   } catch (error) {
     logger.error('Failed to report playback event', { event, error: error.message });
   }
