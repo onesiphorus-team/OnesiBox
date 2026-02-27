@@ -70,7 +70,9 @@ class StateManager extends EventEmitter {
     }
     const oldStatus = this.connectionStatus;
     this.connectionStatus = newStatus;
-    logger.info('Connection status changed', { from: oldStatus, to: newStatus });
+    if (oldStatus !== newStatus) {
+      logger.info('Connection status changed', { from: oldStatus, to: newStatus });
+    }
     this.emit('connectionStatusChange', { from: oldStatus, to: newStatus });
   }
 

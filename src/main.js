@@ -417,7 +417,7 @@ async function startHeartbeat() {
 
       await apiClient.sendHeartbeat(heartbeat);
       stateManager.updateHeartbeat();
-      logger.debug('Heartbeat sent', { status: state.status });
+      logger.info('Heartbeat sent', { status: state.status, cpu: heartbeat.cpu_usage, mem: heartbeat.memory_usage, temp: heartbeat.temperature });
     } catch (error) {
       logger.error('Heartbeat failed', { error: error.message });
     }
