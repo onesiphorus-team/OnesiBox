@@ -1,6 +1,6 @@
 {
   "server_url": "https://onesiforo.example.com",
-  "appliance_id": "1",
+  "appliance_id": "SERIAL-NUMBER-HERE",
   "appliance_token": "your-appliance-token-here",
   "polling_interval_seconds": 5,
   "heartbeat_interval_seconds": 30,
@@ -10,5 +10,6 @@
   "reverb_host": "onesiforo.example.com",
   "reverb_port": 8080,
   "reverb_scheme": "http",
-  "ws_fallback_polling_seconds": 30
+  "ws_fallback_polling_seconds": 30,
+  "_comment_appliance_id": "IMPORTANT: appliance_id MUST be the serial_number from the OnesiBox record in the backend. This value is used for WebSocket channel subscription (private-appliance.{appliance_id}). If it does not match the serial_number, real-time commands via WebSocket will not work (polling fallback will still work)."
 }
