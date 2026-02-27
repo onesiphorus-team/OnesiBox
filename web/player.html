@@ -51,7 +51,12 @@
     }
 
     function showError(msg) {
-      document.getElementById('container').innerHTML = `<div class="error">${msg}</div>`;
+      const container = document.getElementById('container');
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'error';
+      errorDiv.textContent = msg;
+      container.innerHTML = '';
+      container.appendChild(errorDiv);
       // Fallback: if backend polling doesn't consume the error flag within 60s,
       // navigate to standby to self-heal
       setTimeout(() => {
@@ -88,14 +93,21 @@
     }
 
     function playVideo(videoUrl) {
-      // Use innerHTML like the working PoC
-      document.getElementById('container').innerHTML = `
-        <video id="player" autoplay controls style="width:100%;height:100%">
-          <source src="${videoUrl}" type="video/mp4">
-        </video>
-      `;
+      const container = document.getElementById('container');
+      container.innerHTML = '';
 
-      const video = document.getElementById('player');
+      const video = document.createElement('video');
+      video.id = 'player';
+      video.autoplay = true;
+      video.controls = true;
+      video.style.cssText = 'width:100%;height:100%';
+
+      const source = document.createElement('source');
+      source.src = videoUrl;
+      source.type = 'video/mp4';
+
+      video.appendChild(source);
+      container.appendChild(video);
 
       video.onended = () => { window.__onesiboxVideoEnded = true; };
 

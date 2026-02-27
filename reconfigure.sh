@@ -23,6 +23,27 @@ BOLD='\033[1m'
 CONFIG_FILE="/opt/onesibox/config/config.json"
 BACKUP_FILE="/opt/onesibox/config/config.json.backup"
 
+# Detect the service user (same logic as install.sh)
+detect_service_user() {
+    local svc_user
+    svc_user=$(stat -c '%U' "$CONFIG_FILE" 2>/dev/null || stat -f '%Su' "$CONFIG_FILE" 2>/dev/null)
+    if [ -z "$svc_user" ] || [ "$svc_user" = "root" ]; then
+        # Fallback: check systemd service file
+        svc_user=$(grep -oP '(?<=User=)\S+' /etc/systemd/system/onesibox.service 2>/dev/null || echo "")
+    fi
+    if [ -z "$svc_user" ]; then
+        # Final fallback: detect kiosk user like install.sh
+        if id "admin" &>/dev/null; then svc_user="admin"
+        elif id "pi" &>/dev/null; then svc_user="pi"
+        elif id "debian" &>/dev/null; then svc_user="debian"
+        elif id "onesibox" &>/dev/null; then svc_user="onesibox"
+        else svc_user="root"; fi
+    fi
+    echo "$svc_user"
+}
+
+SERVICE_USER=$(detect_service_user)
+
 print_banner() {
     echo -e "${CYAN}"
     echo "╔════════════════════════════════════════════════════╗"
@@ -80,7 +101,7 @@ case $choice in
         jq --arg url "$NEW_URL" '.server_url = $url' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
-        chown onesibox:onesibox "$CONFIG_FILE"
+        chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
 
         echo -e "${GREEN}URL aggiornato a: $NEW_URL${NC}"
         ;;
@@ -93,7 +114,7 @@ case $choice in
         jq --arg token "$NEW_TOKEN" '.appliance_token = $token' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
-        chown onesibox:onesibox "$CONFIG_FILE"
+        chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
 
         echo -e "${GREEN}Token aggiornato${NC}"
         ;;
@@ -105,7 +126,7 @@ case $choice in
         jq --arg id "$NEW_ID" '.appliance_id = $id' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
-        chown onesibox:onesibox "$CONFIG_FILE"
+        chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
 
         echo -e "${GREEN}Appliance ID aggiornato a: $NEW_ID${NC}"
         ;;
@@ -117,7 +138,7 @@ case $choice in
         jq --arg name "$NEW_NAME" '.device_name = $name' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
-        chown onesibox:onesibox "$CONFIG_FILE"
+        chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
 
         echo -e "${GREEN}Nome aggiornato a: $NEW_NAME${NC}"
         ;;
@@ -153,7 +174,7 @@ case $choice in
 
         mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
-        chown onesibox:onesibox "$CONFIG_FILE"
+        chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
 
         echo -e "${GREEN}Configurazione aggiornata${NC}"
         ;;
