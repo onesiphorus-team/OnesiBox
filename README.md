@@ -48,6 +48,8 @@ cp config/config.json.example config/config.json
 npm run dev
 ```
 
+> **Sviluppo su macOS**: per testare contro un server Onesiforo locale servito da Herd (`https://onesiforo.test`) con browser in finestra, vedi [`docs/dev-macos.md`](docs/dev-macos.md) e usa `npm run dev:mac`.
+
 ### Esegui Test
 
 ```bash
