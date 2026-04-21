@@ -73,4 +73,51 @@ describe('stream-playlist handler', () => {
       expect(mediaHandler.startVideoEndedDetection).toHaveBeenCalled();
     });
   });
+
+  describe('playStreamItem — error paths', () => {
+    const command = {
+      id: 'cmd-err',
+      type: 'play_stream_item',
+      payload: {
+        url: 'https://stream.jw.org/6311-4713-5379-2156',
+        ordinal: 3,
+        session_id: 'session-err'
+      }
+    };
+
+    it('should report E111 PLAYLIST_LOAD_FAILED when no tiles render', async () => {
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: false })
+        .mockResolvedValueOnce({ ok: false, tileCount: 0, finalUrl: 'https://stream.jw.org/home' });
+
+      await expect(streamPlaylist.playStreamItem(command, mockBrowserController))
+        .rejects.toMatchObject({ code: 'E111' });
+
+      expect(mockBrowserController.goToStandby).toHaveBeenCalled();
+      expect(mockApiClient.reportPlaybackEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'error',
+          error_code: 'E111'
+        })
+      );
+      expect(mediaHandler.startVideoEndedDetection).not.toHaveBeenCalled();
+    });
+
+    it('should report E112 ORDINAL_OUT_OF_RANGE when tiles fewer than ordinal', async () => {
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: true })
+        .mockResolvedValueOnce({ ok: false, tileCount: 2, finalUrl: 'https://stream.jw.org/home' });
+
+      await expect(streamPlaylist.playStreamItem(command, mockBrowserController))
+        .rejects.toMatchObject({ code: 'E112' });
+
+      expect(mockApiClient.reportPlaybackEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'error',
+          error_code: 'E112',
+          error_message: expect.stringContaining('Ordinal 3 exceeds playlist length 2')
+        })
+      );
+    });
+  });
 });
