@@ -435,11 +435,14 @@ function registerHandlers() {
   const serviceHandler = require('./commands/handlers/service');
   const systemInfoHandler = require('./commands/handlers/system-info');
   const logsHandler = require('./commands/handlers/logs');
+  const streamPlaylistHandler = require('./commands/handlers/stream-playlist');
 
   mediaHandler.setApiClient(apiClient);
+  streamPlaylistHandler.setApiClient(apiClient);
 
   // Media handlers
   commandManager.registerHandler('play_media', mediaHandler.playMedia);
+  commandManager.registerHandler('play_stream_item', streamPlaylistHandler.playStreamItem);
   commandManager.registerHandler('stop_media', mediaHandler.stopMedia);
   commandManager.registerHandler('pause_media', mediaHandler.pauseMedia);
   commandManager.registerHandler('resume_media', mediaHandler.resumeMedia);
