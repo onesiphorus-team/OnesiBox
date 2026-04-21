@@ -28,6 +28,9 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# Playwright MCP session artifacts (DOM snapshots, network logs)
+.playwright-mcp/
+
 # Environment
 .env
 .env.local
