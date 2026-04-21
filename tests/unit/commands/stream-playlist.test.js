@@ -119,5 +119,50 @@ describe('stream-playlist handler', () => {
         })
       );
     });
+
+    it('should report E110 STREAM_NAV_FAILED when navigateTo throws', async () => {
+      mockBrowserController.navigateTo.mockRejectedValueOnce(new Error('DNS timeout'));
+
+      await expect(streamPlaylist.playStreamItem(command, mockBrowserController))
+        .rejects.toMatchObject({ code: 'E110' });
+
+      expect(mockApiClient.reportPlaybackEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'error',
+          error_code: 'E110',
+          error_message: expect.stringContaining('DNS timeout')
+        })
+      );
+      expect(mockBrowserController._executeScript).not.toHaveBeenCalled();
+    });
+
+    it('should report E113 VIDEO_START_FAILED when video never becomes ready', async () => {
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: true })
+        .mockResolvedValueOnce({ ok: true, tileCount: 4 })
+        .mockResolvedValueOnce({ clicked: true })
+        .mockResolvedValueOnce({ ok: false, readyState: 0 });
+
+      await expect(streamPlaylist.playStreamItem(command, mockBrowserController))
+        .rejects.toMatchObject({ code: 'E113' });
+
+      expect(mockApiClient.reportPlaybackEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'error',
+          error_code: 'E113'
+        })
+      );
+      expect(mediaHandler.startVideoEndedDetection).not.toHaveBeenCalled();
+    });
+
+    it('should report E113 VIDEO_START_FAILED when click returns clicked=false', async () => {
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: true })
+        .mockResolvedValueOnce({ ok: true, tileCount: 4 })
+        .mockResolvedValueOnce({ clicked: false });
+
+      await expect(streamPlaylist.playStreamItem(command, mockBrowserController))
+        .rejects.toMatchObject({ code: 'E113' });
+    });
   });
 });
