@@ -80,6 +80,7 @@ Output atteso (log Winston):
 info: OnesiBox starting...
 info: Configuration loaded successfully { server_url: 'https://onesiforo.test', ... }
 info: HTTP server started { port: 3000 }
+info: Initializing browser...
 info: Initializing browser controller
 info: Dev mode: using windowed browser args (no kiosk/fullscreen/no-sandbox)
 info: Using system Chromium for codec support { path: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }
