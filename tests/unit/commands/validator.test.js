@@ -196,3 +196,23 @@ describe('Command Validator', () => {
     });
   });
 });
+
+describe('Stream Playback Error Codes', () => {
+  const { ERROR_CODES } = require('../../../src/commands/validator');
+
+  it('should expose E110 STREAM_NAV_FAILED', () => {
+    expect(ERROR_CODES.STREAM_NAV_FAILED).toBe('E110');
+  });
+
+  it('should expose E111 PLAYLIST_LOAD_FAILED', () => {
+    expect(ERROR_CODES.PLAYLIST_LOAD_FAILED).toBe('E111');
+  });
+
+  it('should expose E112 ORDINAL_OUT_OF_RANGE', () => {
+    expect(ERROR_CODES.ORDINAL_OUT_OF_RANGE).toBe('E112');
+  });
+
+  it('should expose E113 VIDEO_START_FAILED', () => {
+    expect(ERROR_CODES.VIDEO_START_FAILED).toBe('E113');
+  });
+});
