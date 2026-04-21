@@ -50,6 +50,7 @@ const ALLOWED_DOMAINS = [
   'jw.org',
   'www.jw.org',
   'wol.jw.org',
+  'stream.jw.org',
   'download-a.akamaihd.net'
 ];
 
@@ -70,6 +71,7 @@ const MAX_URL_LENGTH = 2048;
  */
 const COMMAND_TYPES = [
   'play_media',
+  'play_stream_item',
   'stop_media',
   'pause_media',
   'resume_media',
@@ -288,6 +290,19 @@ function validateCommand(command) {
       }
       break;
 
+    case 'play_stream_item':
+      if (!command.payload?.url) {
+        errors.push('play_stream_item requires url in payload');
+      } else if (!isStreamJwUrl(command.payload.url)) {
+        errors.push('play_stream_item url must be a stream.jw.org URL');
+      }
+      if (!Number.isInteger(command.payload?.ordinal) ||
+          command.payload.ordinal < 1 ||
+          command.payload.ordinal > 50) {
+        errors.push('play_stream_item ordinal must be integer 1-50');
+      }
+      break;
+
     case 'set_volume':
       if (command.payload?.level === undefined) {
         errors.push('set_volume requires level in payload');
@@ -376,6 +391,7 @@ function getErrorCodeForValidation(errors) {
 function getErrorCodeForCommandType(commandType) {
   switch (commandType) {
     case 'play_media':
+    case 'play_stream_item':
     case 'stop_media':
     case 'pause_media':
     case 'resume_media':

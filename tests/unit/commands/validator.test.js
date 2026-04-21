@@ -195,6 +195,79 @@ describe('Command Validator', () => {
       expect(invalidDelay.valid).toBe(false);
     });
   });
+
+  describe('validateCommand — play_stream_item', () => {
+    const baseCmd = () => ({
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      type: 'play_stream_item',
+      payload: {
+        url: 'https://stream.jw.org/6311-4713-5379-2156',
+        ordinal: 1
+      }
+    });
+
+    it('should accept a valid play_stream_item command', () => {
+      const result = validateCommand(baseCmd());
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should reject missing url', () => {
+      const cmd = baseCmd();
+      delete cmd.payload.url;
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('play_stream_item requires url in payload');
+    });
+
+    it('should reject non-stream.jw.org url', () => {
+      const cmd = baseCmd();
+      cmd.payload.url = 'https://www.jw.org/en/library/';
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('play_stream_item url must be a stream.jw.org URL');
+    });
+
+    it('should reject missing ordinal', () => {
+      const cmd = baseCmd();
+      delete cmd.payload.ordinal;
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('play_stream_item ordinal must be integer 1-50');
+    });
+
+    it('should reject ordinal = 0', () => {
+      const cmd = baseCmd();
+      cmd.payload.ordinal = 0;
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('play_stream_item ordinal must be integer 1-50');
+    });
+
+    it('should reject ordinal > 50', () => {
+      const cmd = baseCmd();
+      cmd.payload.ordinal = 51;
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('play_stream_item ordinal must be integer 1-50');
+    });
+
+    it('should reject non-integer ordinal', () => {
+      const cmd = baseCmd();
+      cmd.payload.ordinal = 1.5;
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('play_stream_item ordinal must be integer 1-50');
+    });
+
+    it('should reject string ordinal', () => {
+      const cmd = baseCmd();
+      cmd.payload.ordinal = '1';
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('play_stream_item ordinal must be integer 1-50');
+    });
+  });
 });
 
 describe('Stream Playback Error Codes', () => {
