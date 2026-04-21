@@ -1,4 +1,4 @@
-const { isUrlAllowed, isZoomUrl, validateCommand } = require('../../../src/commands/validator');
+const { isUrlAllowed, isZoomUrl, isStreamJwUrl, validateCommand } = require('../../../src/commands/validator');
 
 describe('URL Validator', () => {
   describe('isUrlAllowed', () => {
@@ -43,6 +43,45 @@ describe('URL Validator', () => {
     it('should reject non-Zoom URLs', () => {
       expect(isZoomUrl('https://youtube.com/watch')).toBe(false);
       expect(isZoomUrl('https://zoom.com.fake.com/j/123')).toBe(false);
+    });
+  });
+
+  describe('isStreamJwUrl', () => {
+    it('should accept stream.jw.org share link', () => {
+      expect(isStreamJwUrl('https://stream.jw.org/6311-4713-5379-2156')).toBe(true);
+    });
+
+    it('should accept stream.jw.org /home paths', () => {
+      expect(isStreamJwUrl('https://stream.jw.org/home')).toBe(true);
+      expect(isStreamJwUrl('https://stream.jw.org/home?playerOpen=true')).toBe(true);
+    });
+
+    it('should accept valid subdomains of stream.jw.org', () => {
+      expect(isStreamJwUrl('https://www.stream.jw.org/x')).toBe(true);
+    });
+
+    it('should reject HTTP (no TLS)', () => {
+      expect(isStreamJwUrl('http://stream.jw.org/x')).toBe(false);
+    });
+
+    it('should reject subdomain-injection attempts', () => {
+      expect(isStreamJwUrl('https://stream.jw.org.evil.com/x')).toBe(false);
+      expect(isStreamJwUrl('https://fake-stream.jw.org/x')).toBe(false);
+    });
+
+    it('should reject non-standard ports', () => {
+      expect(isStreamJwUrl('https://stream.jw.org:9999/x')).toBe(false);
+    });
+
+    it('should reject invalid URLs', () => {
+      expect(isStreamJwUrl('not-a-url')).toBe(false);
+      expect(isStreamJwUrl('')).toBe(false);
+      expect(isStreamJwUrl(null)).toBe(false);
+    });
+
+    it('should reject URLs exceeding max length', () => {
+      const longPath = 'a'.repeat(3000);
+      expect(isStreamJwUrl(`https://stream.jw.org/${longPath}`)).toBe(false);
     });
   });
 });

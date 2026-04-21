@@ -205,6 +205,38 @@ function isZoomUrl(url) {
 }
 
 /**
+ * Check if a URL is a valid stream.jw.org URL.
+ *
+ * @param {string} url - The URL to validate
+ * @returns {boolean} True if URL is a valid stream.jw.org URL
+ */
+function isStreamJwUrl(url) {
+  try {
+    if (!url || url.length > MAX_URL_LENGTH) {
+      return false;
+    }
+
+    const { hostname, protocol, port } = new URL(url);
+
+    if (protocol !== 'https:') {
+      return false;
+    }
+
+    if (port && port !== '443') {
+      return false;
+    }
+
+    const normalizedHostname = hostname.toLowerCase();
+
+    return normalizedHostname === 'stream.jw.org' ||
+           (normalizedHostname.endsWith('.stream.jw.org') &&
+            isValidSubdomainPart(normalizedHostname.slice(0, -'.stream.jw.org'.length)));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Validate a command structure and payload.
  *
  * @param {object} command - The command to validate
@@ -363,6 +395,7 @@ function getErrorCodeForCommandType(commandType) {
 module.exports = {
   isUrlAllowed,
   isZoomUrl,
+  isStreamJwUrl,
   validateCommand,
   getErrorCodeForValidation,
   getErrorCodeForCommandType,
