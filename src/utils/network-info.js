@@ -76,13 +76,18 @@ async function getNetworkInfo() {
       const wifiConn = wifiConnections[0];
       const signalDbm = wifiConn.signalLevel || -100;
 
+      // On macOS, systeminformation returns wifiConn.security as an array
+      // (e.g. ["WPA2"]); on Linux it's a string. Normalize to string.
+      const rawSecurity = wifiConn.security;
+      const security = Array.isArray(rawSecurity) ? (rawSecurity[0] || null) : (rawSecurity || null);
+
       wifi = {
         ssid: wifiConn.ssid || null,
         signal_dbm: signalDbm,
         signal_percent: signalDbmToPercent(signalDbm),
         channel: wifiConn.channel || null,
         frequency: wifiConn.frequency || null,
-        security: wifiConn.security || null
+        security
       };
     }
 
