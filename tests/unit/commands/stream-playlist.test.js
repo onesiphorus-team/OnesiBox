@@ -165,4 +165,49 @@ describe('stream-playlist handler', () => {
         .rejects.toMatchObject({ code: 'E113' });
     });
   });
+
+  describe('playStreamItem — integration with media handler', () => {
+    const command = {
+      id: 'cmd-int',
+      type: 'play_stream_item',
+      payload: {
+        url: 'https://stream.jw.org/6311-4713-5379-2156',
+        ordinal: 1,
+        session_id: 'session-int'
+      }
+    };
+
+    it('should call mediaHandler.stopMedia if status is PLAYING at entry', async () => {
+      stateManager.currentMedia = {
+        url: 'https://www.jw.org/previous',
+        media_type: 'video'
+      };
+      stateManager.status = STATUS.PLAYING;
+
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: true })
+        .mockResolvedValueOnce({ ok: true, tileCount: 4 })
+        .mockResolvedValueOnce({ clicked: true })
+        .mockResolvedValueOnce({ ok: true, readyState: 4, duration: 1000 })
+        .mockResolvedValueOnce({ hooksInstalled: true });
+
+      await streamPlaylist.playStreamItem(command, mockBrowserController);
+
+      expect(mediaHandler.stopMedia).toHaveBeenCalledTimes(1);
+      expect(mediaHandler.stopMedia).toHaveBeenCalledWith(command, mockBrowserController);
+    });
+
+    it('should NOT call mediaHandler.stopMedia if status is already IDLE', async () => {
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: true })
+        .mockResolvedValueOnce({ ok: true, tileCount: 4 })
+        .mockResolvedValueOnce({ clicked: true })
+        .mockResolvedValueOnce({ ok: true, readyState: 4, duration: 1000 })
+        .mockResolvedValueOnce({ hooksInstalled: true });
+
+      await streamPlaylist.playStreamItem(command, mockBrowserController);
+
+      expect(mediaHandler.stopMedia).not.toHaveBeenCalled();
+    });
+  });
 });
