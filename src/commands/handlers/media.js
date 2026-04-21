@@ -286,5 +286,6 @@ module.exports = {
   resumeMedia,
   setApiClient,
   reportPlaybackEvent,
+  startVideoEndedDetection,
   stopVideoEndedDetection
 };
