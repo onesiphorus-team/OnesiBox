@@ -9,6 +9,7 @@ const LOCAL_PORT = process.env.PORT || 3000;
 const STANDBY_URL = `http://localhost:${LOCAL_PORT}`;
 const LOCAL_URL_PREFIX = `http://localhost:${LOCAL_PORT}/`;
 const DATA_DIR = process.env.ONESIBOX_DATA_DIR || '/opt/onesibox/data';
+const IS_DEV_MODE = process.env.ONESIBOX_DEV_MODE === '1';
 
 // Find system Chromium executable
 function findChromiumPath() {
@@ -27,6 +28,9 @@ function findChromiumPath() {
     '/snap/bin/chromium',
     '/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
   ];
 
   for (const p of paths) {
@@ -82,22 +86,41 @@ class BrowserController {
     logger.info('Display server detected', { isWayland, WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY });
 
     // Common browser arguments
-    this.launchArgs = [
-      '--kiosk',
-      '--noerrdialogs',
-      '--disable-infobars',
-      '--no-first-run',
-      '--autoplay-policy=no-user-gesture-required',
-      '--disable-session-crashed-bubble',
-      '--disable-features=TranslateUI',
-      '--check-for-update-interval=31536000',
-      '--disable-component-update',
-      '--disable-background-networking',
-      '--disable-sync',
-      '--disable-default-apps',
-      '--start-fullscreen',
-      '--no-sandbox',
-    ];
+    if (IS_DEV_MODE) {
+      // Dev mode (macOS/local): windowed, no kiosk, no sandbox flag.
+      // Keep the args that only affect behavior (no UI takeover).
+      this.launchArgs = [
+        '--noerrdialogs',
+        '--disable-infobars',
+        '--no-first-run',
+        '--autoplay-policy=no-user-gesture-required',
+        '--disable-session-crashed-bubble',
+        '--disable-features=TranslateUI',
+        '--check-for-update-interval=31536000',
+        '--disable-component-update',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-default-apps',
+      ];
+      logger.info('Dev mode: using windowed browser args (no kiosk/fullscreen/no-sandbox)');
+    } else {
+      this.launchArgs = [
+        '--kiosk',
+        '--noerrdialogs',
+        '--disable-infobars',
+        '--no-first-run',
+        '--autoplay-policy=no-user-gesture-required',
+        '--disable-session-crashed-bubble',
+        '--disable-features=TranslateUI',
+        '--check-for-update-interval=31536000',
+        '--disable-component-update',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-default-apps',
+        '--start-fullscreen',
+        '--no-sandbox',
+      ];
+    }
 
     if (isWayland) {
       this.launchArgs.push(
@@ -140,7 +163,7 @@ class BrowserController {
       headless: false,
       args: this.launchArgs,
       ignoreDefaultArgs: ['--enable-automation'],
-      viewport: null,
+      viewport: IS_DEV_MODE ? { width: 1280, height: 800 } : null,
       ignoreHTTPSErrors: true,
     };
 

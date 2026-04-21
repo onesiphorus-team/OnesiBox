@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/main.js",
     "dev": "NODE_ENV=development node src/main.js",
+    "dev:mac": "ONESIBOX_DEV_MODE=1 ONESIBOX_DATA_DIR=./.dev-data NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/Herd/config/valet/CA/HerdCASelfSigned.pem\" node src/main.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src/"

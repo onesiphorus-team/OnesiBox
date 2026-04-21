@@ -12,6 +12,7 @@ config/config.json
 # Build outputs
 dist/
 build/
+.dev-data/
 
 # IDE
 .idea/
