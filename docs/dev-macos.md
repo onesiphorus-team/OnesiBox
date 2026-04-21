@@ -108,6 +108,40 @@ Verifica end-to-end che il dev mode sia funzionante:
 6. **Shutdown pulito** — Ctrl+C nel terminale di `npm run dev:mac`.
    - Log: `info: Shutting down { signal: 'SIGINT' }` e il processo esce senza errori.
 
+### Smoke test `play_stream_item` (playlist JW Stream)
+
+1. Con `npm run dev:mac` attivo, invia dal backend Onesiforo il comando:
+   ```json
+   {
+     "type": "play_stream_item",
+     "payload": {
+       "url": "https://stream.jw.org/6311-4713-5379-2156",
+       "ordinal": 1,
+       "session_id": "smoke-test"
+     }
+   }
+   ```
+
+2. Log attesi (Winston):
+   - `info: Playing stream item { url: 'https://stream.jw.org/...', ordinal: 1 }`
+   - `info: Navigating to URL { url: 'https://stream.jw.org/...' }`
+   - `info: Navigation successful`
+   - `info: Stream playback event reported { event: 'started', ordinal: 1 }`
+   - `info: Starting video ended detection`
+
+3. Finestra Chrome: redirect automatico a `/home`, il cookie banner appare brevemente e viene dismisso (o non intercetta il click), Video.js parte in fullscreen con la Parte 1.
+
+4. Inviare un secondo comando con `"ordinal": 2`, stesso URL: il primo video si ferma, la pagina ri-naviga, parte la Parte 2.
+
+5. Inviare `"ordinal": 99`: il comando fallisce pulito con:
+   - `error: play_stream_item failed { error_code: 'E112', ... }`
+   - `info: Stream playback event reported { event: 'error' }`
+   - La UI torna in standby.
+
+6. Inviare `stop_media` durante la riproduzione di un item: standby + evento `stopped`.
+
+7. Far terminare naturalmente il video (per un test rapido: da DevTools di Chrome `document.querySelector('video').currentTime = document.querySelector('video').duration - 2`): entro 2-4 s partono `completed` e standby.
+
 ## Troubleshooting
 
 ### `UNABLE_TO_VERIFY_LEAF_SIGNATURE` o errori TLS su polling/heartbeat
@@ -155,3 +189,5 @@ Intenzionalmente:
 - **`reboot` / `shutdown` / `restart_service`**: se ricevuti, falliscono con log. Test fine-grained solo su Raspberry Pi.
 - **`set_volume`**: il comando `amixer` non esiste su macOS, il comando fallirà con log e non cambierà il volume.
 - **Systemd watchdog**: disabilitato quando `NOTIFY_SOCKET` non è settato (macOS). Normale.
+- **DOM changes di JW Stream**: se JW ridisegna la SPA togliendo la classe `MuiCardActionArea-root`, `play_stream_item` fallisce con `E111 PLAYLIST_LOAD_FAILED`. Richiede aggiornamento firmware.
+- **Share link privati JW Stream**: URL che richiedono login JW (account personale) non sono supportati. Questo design copre solo link di condivisione pubblica.
