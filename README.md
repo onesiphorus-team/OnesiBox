@@ -48,7 +48,29 @@ cp config/config.json.example config/config.json
 npm run dev
 ```
 
-> **Sviluppo su macOS**: per testare contro un server Onesiforo locale servito da Herd (`https://onesiforo.test`) con browser in finestra, vedi [`docs/dev-macos.md`](docs/dev-macos.md) e usa `npm run dev:mac`.
+### Sviluppo su macOS (dev mode)
+
+Per iterare rapidamente contro un server Onesiforo locale (es. servito da Herd su `https://onesiforo.test`) senza deployare su Raspberry Pi, il client supporta un **dev mode** che attiva un browser Chrome in finestra (no kiosk/fullscreen) con DevTools disponibili. Produzione su Pi resta invariata.
+
+**Prerequisiti**: Herd con `onesiforo.test` secured in HTTPS, Google Chrome in `/Applications`, server Onesiforo attivo.
+
+```bash
+# 1. Crea config/config.json (gitignored) con i valori della tua installazione
+cp config/config.json.example config/config.json
+# Poi imposta server_url, appliance_id, appliance_token
+
+# 2. Verifica che il cert CA di Herd sia al path atteso dallo script
+ls "$HOME/Library/Application Support/Herd/config/valet/CA/HerdCASelfSigned.pem"
+# Se il nome differisce (es. LaravelValetCASelfSigned.pem), crea un symlink o adatta package.json
+
+# 3. Avvia
+npm install
+npm run dev:mac
+```
+
+Lo script `dev:mac` imposta tre env vars: `ONESIBOX_DEV_MODE=1` (attiva finestra + viewport 1280x800), `ONESIBOX_DATA_DIR=./.dev-data` (profilo Playwright gitignored), `NODE_EXTRA_CA_CERTS=<path al CA Herd>` (fa fidare Node del cert self-signed senza disabilitare la verifica TLS).
+
+Guida completa con configurazione WebSocket Reverb, smoke test passo-passo, e troubleshooting TLS/codec: [`docs/dev-macos.md`](docs/dev-macos.md).
 
 ### Esegui Test
 
