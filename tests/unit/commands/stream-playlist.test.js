@@ -72,6 +72,37 @@ describe('stream-playlist handler', () => {
       );
       expect(mediaHandler.startVideoEndedDetection).toHaveBeenCalled();
     });
+
+    it('should propagate ordinal to startVideoEndedDetection so completed events include it', async () => {
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: true })
+        .mockResolvedValueOnce({ ok: true, tileCount: 4 })
+        .mockResolvedValueOnce({ clicked: true })
+        .mockResolvedValueOnce({ ok: true, readyState: 4, duration: 4697 })
+        .mockResolvedValueOnce({ hooksInstalled: true });
+
+      const command = {
+        id: 'cmd-ordinal',
+        type: 'play_stream_item',
+        payload: {
+          url: 'https://stream.jw.org/6311-4713-5379-2156',
+          ordinal: 2,
+          session_id: 'session-ord'
+        }
+      };
+
+      await streamPlaylist.playStreamItem(command, mockBrowserController);
+
+      expect(mediaHandler.startVideoEndedDetection).toHaveBeenCalledWith(
+        mockBrowserController,
+        expect.objectContaining({
+          url: 'https://stream.jw.org/6311-4713-5379-2156',
+          media_type: 'video',
+          session_id: 'session-ord',
+          ordinal: 2
+        })
+      );
+    });
   });
 
   describe('playStreamItem — error paths', () => {
@@ -208,6 +239,30 @@ describe('stream-playlist handler', () => {
       await streamPlaylist.playStreamItem(command, mockBrowserController);
 
       expect(mediaHandler.stopMedia).not.toHaveBeenCalled();
+    });
+
+    it('should abort before setPlaying if state mutates to non-IDLE during async flow', async () => {
+      mockBrowserController._executeScript
+        .mockResolvedValueOnce({ dismissed: true })
+        .mockResolvedValueOnce({ ok: true, tileCount: 4 })
+        .mockResolvedValueOnce({ clicked: true })
+        .mockResolvedValueOnce({ ok: true, readyState: 4, duration: 1000 })
+        .mockImplementationOnce(async () => {
+          // Simula un'operazione concorrente (es. altro comando, stop_media)
+          // che muta lo stato prima che noi chiamiamo setPlaying.
+          stateManager.status = STATUS.CALLING;
+          return { hooksInstalled: true };
+        });
+
+      await streamPlaylist.playStreamItem(command, mockBrowserController);
+
+      // setPlaying NON deve essere stato chiamato: lo status resta CALLING,
+      // NON diventa PLAYING (che sarebbe il side-effect di setPlaying).
+      expect(stateManager.status).toBe(STATUS.CALLING);
+      expect(mockApiClient.reportPlaybackEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'started' })
+      );
+      expect(mediaHandler.startVideoEndedDetection).not.toHaveBeenCalled();
     });
   });
 });

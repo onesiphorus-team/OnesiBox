@@ -138,7 +138,6 @@ async function playStreamItem(command, browserController) {
   } catch (error) {
     await _abortWithError(browserController, mediaInfo, ERROR_CODES.STREAM_NAV_FAILED,
       `Navigation failed: ${error.message}`);
-    return;
   }
 
   await _dismissCookieBanner(browserController);
@@ -153,27 +152,29 @@ async function playStreamItem(command, browserController) {
       await _abortWithError(browserController, mediaInfo, ERROR_CODES.ORDINAL_OUT_OF_RANGE,
         `Ordinal ${ordinal} exceeds playlist length ${tileCount}`);
     }
-    return;
   }
 
   const clickResult = await _clickNthTile(browserController, ordinal);
   if (!clickResult || !clickResult.clicked) {
     await _abortWithError(browserController, mediaInfo, ERROR_CODES.VIDEO_START_FAILED,
       `Failed to click tile ${ordinal}`);
-    return;
   }
 
   const videoResult = await _waitForVideo(browserController);
   if (!videoResult || !videoResult.ok) {
     await _abortWithError(browserController, mediaInfo, ERROR_CODES.VIDEO_START_FAILED,
       `Video did not start within ${WAIT_VIDEO_TIMEOUT_MS}ms (readyState: ${videoResult?.readyState})`);
-    return;
   }
 
   await _injectEndedHooks(browserController);
 
-  if (stateManager.getState().status === STATUS.PLAYING) {
-    logger.info('Stream item aborted before start (state no longer IDLE)');
+  // Guard contro race: se durante la lunga catena async qualcun altro ha
+  // mutato lo stato fuori da IDLE (nuovo comando, stop, errore), non
+  // sovrascriviamo — lasciamo vincere l'operazione concorrente.
+  if (stateManager.getState().status !== STATUS.IDLE) {
+    logger.info('Stream item aborted before setPlaying (state no longer IDLE)', {
+      currentStatus: stateManager.getState().status
+    });
     return;
   }
 
@@ -184,7 +185,8 @@ async function playStreamItem(command, browserController) {
   mediaHandler.startVideoEndedDetection(browserController, {
     url,
     media_type: 'video',
-    session_id
+    session_id,
+    ordinal
   });
 }
 

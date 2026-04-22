@@ -31,10 +31,13 @@ async function reportPlaybackEvent(event, mediaInfo = null) {
       if (mediaInfo.session_id) {
         payload.session_id = mediaInfo.session_id;
       }
+      if (mediaInfo.ordinal !== undefined && mediaInfo.ordinal !== null) {
+        payload.ordinal = mediaInfo.ordinal;
+      }
     }
 
     await apiClient.reportPlaybackEvent(payload);
-    logger.info('Playback event reported', { event, media_url: payload.media_url, session_id: payload.session_id || null });
+    logger.info('Playback event reported', { event, media_url: payload.media_url, session_id: payload.session_id || null, ordinal: payload.ordinal ?? null });
   } catch (error) {
     logger.error('Failed to report playback event', { event, error: error.message });
   }
