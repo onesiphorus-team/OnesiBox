@@ -33,7 +33,13 @@ const ERROR_CODES = {
   DIAGNOSTICS_HANDLER_FAILED: 'E105',
   SERVICE_HANDLER_FAILED: 'E106',
   INVALID_COMMAND_STRUCTURE: 'E107',
-  INVALID_PAYLOAD: 'E108'
+  INVALID_PAYLOAD: 'E108',
+
+  // Stream playlist errors
+  STREAM_NAV_FAILED: 'E110',
+  PLAYLIST_LOAD_FAILED: 'E111',
+  ORDINAL_OUT_OF_RANGE: 'E112',
+  VIDEO_START_FAILED: 'E113'
 };
 
 /**
@@ -44,6 +50,7 @@ const ALLOWED_DOMAINS = [
   'jw.org',
   'www.jw.org',
   'wol.jw.org',
+  'stream.jw.org',
   'download-a.akamaihd.net'
 ];
 
@@ -64,6 +71,7 @@ const MAX_URL_LENGTH = 2048;
  */
 const COMMAND_TYPES = [
   'play_media',
+  'play_stream_item',
   'stop_media',
   'pause_media',
   'resume_media',
@@ -205,6 +213,38 @@ function isZoomUrl(url) {
 }
 
 /**
+ * Check if a URL is a valid stream.jw.org URL.
+ *
+ * @param {string} url - The URL to validate
+ * @returns {boolean} True if URL is a valid stream.jw.org URL
+ */
+function isStreamJwUrl(url) {
+  try {
+    if (!url || url.length > MAX_URL_LENGTH) {
+      return false;
+    }
+
+    const { hostname, protocol, port } = new URL(url);
+
+    if (protocol !== 'https:') {
+      return false;
+    }
+
+    if (port && port !== '443') {
+      return false;
+    }
+
+    const normalizedHostname = hostname.toLowerCase();
+
+    return normalizedHostname === 'stream.jw.org' ||
+           (normalizedHostname.endsWith('.stream.jw.org') &&
+            isValidSubdomainPart(normalizedHostname.slice(0, -'.stream.jw.org'.length)));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Validate a command structure and payload.
  *
  * @param {object} command - The command to validate
@@ -247,6 +287,19 @@ function validateCommand(command) {
       }
       if (!command.payload?.media_type || !['video', 'audio'].includes(command.payload.media_type)) {
         errors.push('play_media requires media_type (video|audio) in payload');
+      }
+      break;
+
+    case 'play_stream_item':
+      if (!command.payload?.url) {
+        errors.push('play_stream_item requires url in payload');
+      } else if (!isStreamJwUrl(command.payload.url)) {
+        errors.push('play_stream_item url must be a stream.jw.org URL');
+      }
+      if (!Number.isInteger(command.payload?.ordinal) ||
+          command.payload.ordinal < 1 ||
+          command.payload.ordinal > 50) {
+        errors.push('play_stream_item ordinal must be integer 1-50');
       }
       break;
 
@@ -338,6 +391,7 @@ function getErrorCodeForValidation(errors) {
 function getErrorCodeForCommandType(commandType) {
   switch (commandType) {
     case 'play_media':
+    case 'play_stream_item':
     case 'stop_media':
     case 'pause_media':
     case 'resume_media':
@@ -363,6 +417,7 @@ function getErrorCodeForCommandType(commandType) {
 module.exports = {
   isUrlAllowed,
   isZoomUrl,
+  isStreamJwUrl,
   validateCommand,
   getErrorCodeForValidation,
   getErrorCodeForCommandType,
