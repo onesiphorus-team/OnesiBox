@@ -196,7 +196,9 @@ main() {
 
     # Fetch and check for updates
     log "INFO" "Checking for updates..."
-    if ! git fetch origin main --quiet 2>/dev/null; then
+    # --tags ensures release tags (used by getAppVersion → git describe) are synced;
+    # --force keeps tag refs aligned if they were moved upstream.
+    if ! git fetch origin main --tags --force --quiet 2>/dev/null; then
         log "ERROR" "Failed to fetch from remote"
         exit 1
     fi
