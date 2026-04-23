@@ -190,7 +190,10 @@ main() {
 
     # Get current version before pull
     OLD_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-    OLD_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")
+    # Match the client's own getAppVersion() source so the log reports the
+    # same version the dashboard sees (git tag), falling back to package.json.
+    OLD_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)
+    OLD_VERSION=${OLD_VERSION:-$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")}
 
     log "INFO" "Current version: ${OLD_VERSION} (${OLD_COMMIT:0:7})"
 
@@ -221,7 +224,8 @@ main() {
     git pull origin main --quiet 2>/dev/null || git pull origin master --quiet
 
     NEW_COMMIT=$(git rev-parse HEAD)
-    NEW_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "unknown")
+    NEW_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)
+    NEW_VERSION=${NEW_VERSION:-$(node -p "require('./package.json').version" 2>/dev/null || echo "unknown")}
 
     log "INFO" "Updated to version: ${NEW_VERSION} (${NEW_COMMIT:0:7})"
 
