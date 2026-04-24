@@ -345,6 +345,10 @@ function validateCommand(command) {
           errors.push('get_logs lines must be 1-500');
         }
       }
+      if (command.payload?.include_heartbeats !== undefined &&
+          typeof command.payload.include_heartbeats !== 'boolean') {
+        errors.push('get_logs include_heartbeats must be a boolean');
+      }
       break;
 
     case 'get_system_info':
