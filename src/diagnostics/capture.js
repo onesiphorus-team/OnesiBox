@@ -15,7 +15,10 @@ function captureScreen({ quality = 75, timeoutMs = 8000 } = {}) {
 
     try {
       grim = spawn('grim', ['-t', 'ppm', '-'], { env });
-      cwebp = spawn('cwebp', ['-q', String(quality), '-o', '-', '-'], { env });
+      // The `--` separator is required: cwebp 1.5 refuses to treat a trailing
+      // bare `-` as the stdin input filename unless options are explicitly
+      // terminated. Without it: "Error! Unknown option '-'" and exit code 1.
+      cwebp = spawn('cwebp', ['-q', String(quality), '-o', '-', '--', '-'], { env });
     } catch (err) {
       return reject(new Error(`spawn failed: ${err.code || err.message}`));
     }
