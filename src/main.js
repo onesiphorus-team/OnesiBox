@@ -15,6 +15,7 @@ const BrowserController = require('./browser/controller');
 const CommandManager = require('./commands/manager');
 const { getVolume } = require('./commands/handlers/volume');
 const { getNetworkInfo, getDetailedMemory } = require('./utils/network-info');
+const ScreenshotScheduler = require('./diagnostics/screenshot-scheduler');
 
 const execFileAsync = promisify(execFile);
 
@@ -102,6 +103,7 @@ let apiClient;
 let wsManager;
 let browserController;
 let commandManager;
+let screenshotScheduler;
 let pollingInterval;
 let heartbeatInterval;
 let originalPollingIntervalMs;
@@ -415,9 +417,18 @@ async function startHeartbeat() {
         memory: await getDetailedMemory(mem)
       };
 
-      await apiClient.sendHeartbeat(heartbeat);
+      const res = await apiClient.sendHeartbeat(heartbeat);
       stateManager.updateHeartbeat();
       logger.info('Heartbeat sent', { status: state.status, cpu: heartbeat.cpu_usage, mem: heartbeat.memory_usage, temp: heartbeat.temperature });
+
+      // Propagate diagnostic screenshot config from server response
+      if (screenshotScheduler) {
+        const payload = res?.data || res || {};
+        screenshotScheduler.applyServerConfig({
+          enabled: payload.screenshot_enabled,
+          intervalSeconds: payload.screenshot_interval_seconds,
+        });
+      }
     } catch (error) {
       logger.error('Heartbeat failed', { error: error.message });
     }
@@ -474,6 +485,10 @@ async function shutdown(signal) {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
 
+  if (screenshotScheduler) {
+    screenshotScheduler.stop();
+  }
+
   if (wsManager) {
     wsManager.disconnect();
   }
@@ -516,6 +531,13 @@ async function main() {
   apiClient = new ApiClient(config);
   browserController = new BrowserController();
   commandManager = new CommandManager(apiClient, browserController);
+
+  screenshotScheduler = new ScreenshotScheduler({
+    apiClient,
+    logger,
+    config,
+  });
+  screenshotScheduler.start();
 
   registerHandlers();
 
