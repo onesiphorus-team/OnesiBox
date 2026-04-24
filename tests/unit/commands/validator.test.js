@@ -194,6 +194,30 @@ describe('Command Validator', () => {
       });
       expect(invalidDelay.valid).toBe(false);
     });
+
+    it('should validate get_logs include_heartbeats flag', () => {
+      const noFlag = validateCommand({
+        id: '123',
+        type: 'get_logs',
+        payload: { lines: 50 }
+      });
+      expect(noFlag.valid).toBe(true);
+
+      const asBool = validateCommand({
+        id: '123',
+        type: 'get_logs',
+        payload: { include_heartbeats: true }
+      });
+      expect(asBool.valid).toBe(true);
+
+      const asNonBool = validateCommand({
+        id: '123',
+        type: 'get_logs',
+        payload: { include_heartbeats: 'yes' }
+      });
+      expect(asNonBool.valid).toBe(false);
+      expect(asNonBool.errors.join(' ')).toMatch(/include_heartbeats/);
+    });
   });
 
   describe('validateCommand — play_stream_item', () => {

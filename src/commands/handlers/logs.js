@@ -23,8 +23,23 @@ const MAX_LINES = 500;
 const DEFAULT_LINES = 100;
 
 /**
+ * Check whether a log line is a heartbeat record emitted by startHeartbeat().
+ * Heartbeats are JSON lines with message === 'Heartbeat sent'.
+ */
+function isHeartbeatLine(line) {
+  if (!line.includes('Heartbeat sent')) return false;
+  try {
+    return JSON.parse(line).message === 'Heartbeat sent';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Get the last N lines from the application log file.
  * Sanitizes sensitive data before returning.
+ * Heartbeat records are filtered out by default — set payload.include_heartbeats
+ * to true to keep them (useful for diagnosing missing heartbeats).
  *
  * @param {object} command - The command object
  * @param {object} _browserController - Browser controller (unused)
@@ -33,10 +48,12 @@ const DEFAULT_LINES = 100;
 async function getLogs(command, _browserController) {
   const requestedLines = command.payload?.lines || DEFAULT_LINES;
   const lines = Math.min(Math.max(1, requestedLines), MAX_LINES);
+  const includeHeartbeats = command.payload?.include_heartbeats === true;
 
   logger.info('Retrieving application logs', {
     commandId: command.id,
-    requestedLines: lines
+    requestedLines: lines,
+    includeHeartbeats
   });
 
   try {
@@ -68,8 +85,14 @@ async function getLogs(command, _browserController) {
     const content = await fs.readFile(logPath, 'utf-8');
     const allLines = content.split('\n').filter(line => line.trim());
 
+    // Filter heartbeats BEFORE slicing so that N lines of signal aren't drowned
+    // out by the heartbeat noise that dominates the tail of the file.
+    const candidateLines = includeHeartbeats
+      ? allLines
+      : allLines.filter(line => !isHeartbeatLine(line));
+
     // Get last N lines
-    const lastLines = allLines.slice(-lines);
+    const lastLines = candidateLines.slice(-lines);
 
     // Sanitize sensitive data
     const sanitizedLines = sanitizeLogContent(lastLines);
@@ -77,7 +100,8 @@ async function getLogs(command, _browserController) {
     logger.info('Logs retrieved successfully', {
       commandId: command.id,
       totalLines: allLines.length,
-      returnedLines: sanitizedLines.length
+      returnedLines: sanitizedLines.length,
+      heartbeatsFiltered: allLines.length - candidateLines.length
     });
 
     return {
@@ -85,6 +109,7 @@ async function getLogs(command, _browserController) {
       total_lines: allLines.length,
       requested_lines: lines,
       returned_lines: sanitizedLines.length,
+      heartbeats_filtered: allLines.length - candidateLines.length,
       log_file: path.basename(logPath),
       timestamp: new Date().toISOString()
     };

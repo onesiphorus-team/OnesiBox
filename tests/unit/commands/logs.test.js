@@ -163,4 +163,103 @@ describe('Logs Handler', () => {
     });
   });
 
+  describe('Heartbeat filtering', () => {
+    const heartbeat = (ts) => JSON.stringify({
+      level: 'info',
+      message: 'Heartbeat sent',
+      service: 'onesibox',
+      status: 'idle',
+      timestamp: ts
+    });
+    const realLog = (msg) => JSON.stringify({
+      level: 'info',
+      message: msg,
+      service: 'onesibox'
+    });
+
+    it('filters out heartbeat lines by default', async () => {
+      const logContent = [
+        realLog('App started'),
+        heartbeat('2026-04-24T10:00:00Z'),
+        realLog('Command received'),
+        heartbeat('2026-04-24T10:00:30Z'),
+        realLog('Command completed')
+      ].join('\n');
+
+      fs.access.mockResolvedValue();
+      fs.readFile.mockResolvedValue(logContent);
+
+      const command = { id: '123', type: 'get_logs', payload: { lines: 10 } };
+      const result = await getLogs(command, mockBrowserController);
+
+      expect(result.returned_lines).toBe(3);
+      expect(result.total_lines).toBe(5);
+      expect(result.heartbeats_filtered).toBe(2);
+      expect(result.lines.every(line => !line.includes('Heartbeat sent'))).toBe(true);
+    });
+
+    it('includes heartbeats when include_heartbeats is true', async () => {
+      const logContent = [
+        realLog('App started'),
+        heartbeat('2026-04-24T10:00:00Z'),
+        realLog('Command received')
+      ].join('\n');
+
+      fs.access.mockResolvedValue();
+      fs.readFile.mockResolvedValue(logContent);
+
+      const command = {
+        id: '123',
+        type: 'get_logs',
+        payload: { lines: 10, include_heartbeats: true }
+      };
+      const result = await getLogs(command, mockBrowserController);
+
+      expect(result.returned_lines).toBe(3);
+      expect(result.heartbeats_filtered).toBe(0);
+      expect(result.lines.some(line => line.includes('Heartbeat sent'))).toBe(true);
+    });
+
+    it('filters heartbeats BEFORE slicing so requested N lines are all signal', async () => {
+      // 20 heartbeats tail-padding 2 real log lines: requesting 2 lines must
+      // return the 2 real lines, not 2 heartbeats.
+      const heartbeats = Array.from({ length: 20 }, (_, i) =>
+        heartbeat(`2026-04-24T10:00:${String(i).padStart(2, '0')}Z`)
+      );
+      const logContent = [
+        realLog('First real event'),
+        realLog('Second real event'),
+        ...heartbeats
+      ].join('\n');
+
+      fs.access.mockResolvedValue();
+      fs.readFile.mockResolvedValue(logContent);
+
+      const command = { id: '123', type: 'get_logs', payload: { lines: 2 } };
+      const result = await getLogs(command, mockBrowserController);
+
+      expect(result.returned_lines).toBe(2);
+      expect(result.lines[0]).toContain('First real event');
+      expect(result.lines[1]).toContain('Second real event');
+      expect(result.heartbeats_filtered).toBe(20);
+    });
+
+    it('treats non-JSON lines as non-heartbeats', async () => {
+      const logContent = [
+        'plain text without JSON',
+        'Heartbeat sent but not valid JSON',
+        realLog('App event')
+      ].join('\n');
+
+      fs.access.mockResolvedValue();
+      fs.readFile.mockResolvedValue(logContent);
+
+      const command = { id: '123', type: 'get_logs', payload: { lines: 10 } };
+      const result = await getLogs(command, mockBrowserController);
+
+      expect(result.returned_lines).toBe(3);
+      expect(result.heartbeats_filtered).toBe(0);
+    });
+  });
+
 });
