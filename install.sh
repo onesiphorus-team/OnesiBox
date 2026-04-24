@@ -444,7 +444,7 @@ install_system_packages() {
 
     # Utilities
     print_info "Installazione utilities..."
-    apt install -y -qq curl wget jq
+    apt install -y -qq curl wget jq grim webp
     print_success "Utilities installate"
 }
 

@@ -22,7 +22,9 @@ const ENV_OVERRIDES = {
   ONESIBOX_REVERB_HOST: 'reverb_host',
   ONESIBOX_REVERB_PORT: 'reverb_port',
   ONESIBOX_REVERB_SCHEME: 'reverb_scheme',
-  ONESIBOX_WS_FALLBACK_POLLING: 'ws_fallback_polling_seconds'
+  ONESIBOX_WS_FALLBACK_POLLING: 'ws_fallback_polling_seconds',
+  ONESIBOX_SCREENSHOT_ENABLED: 'screenshot_enabled',
+  ONESIBOX_SCREENSHOT_INTERVAL: 'screenshot_interval_seconds'
 };
 
 /**
@@ -35,12 +37,12 @@ function applyEnvOverrides(config) {
     const value = process.env[envVar];
     if (value !== undefined) {
       // Parse numeric values
-      if (['polling_interval_seconds', 'heartbeat_interval_seconds', 'default_volume', 'reverb_port', 'ws_fallback_polling_seconds'].includes(configKey)) {
+      if (['polling_interval_seconds', 'heartbeat_interval_seconds', 'default_volume', 'reverb_port', 'ws_fallback_polling_seconds', 'screenshot_interval_seconds'].includes(configKey)) {
         const numValue = parseInt(value, 10);
         if (!isNaN(numValue)) {
           config[configKey] = numValue;
         }
-      } else if (configKey === 'websocket_enabled') {
+      } else if (configKey === 'websocket_enabled' || configKey === 'screenshot_enabled') {
         config[configKey] = value === 'true' || value === '1';
       } else {
         config[configKey] = value;
@@ -106,7 +108,20 @@ function validateConfig(config) {
     }
   }
 
-  return errors;
+  if (config.screenshot_enabled !== undefined && typeof config.screenshot_enabled !== 'boolean') {
+    errors.push('screenshot_enabled must be a boolean');
+  }
+
+  if (config.screenshot_interval_seconds !== undefined) {
+    const s = Number(config.screenshot_interval_seconds);
+    if (!Number.isInteger(s) || s < 10 || s > 3600) {
+      errors.push('screenshot_interval_seconds must be an integer between 10 and 3600');
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Invalid config: ${errors.join('; ')}`);
+  }
 }
 
 function loadConfig() {
@@ -128,9 +143,12 @@ function loadConfig() {
   // Apply environment variable overrides (takes precedence over config file)
   applyEnvOverrides(config);
 
-  const errors = validateConfig(config);
-  if (errors.length > 0) {
-    throw new Error(`Configuration validation failed:\n  - ${errors.join('\n  - ')}`);
+  try {
+    validateConfig(config);
+  } catch (e) {
+    // Re-throw with prefixed message to preserve prior behavior for loadConfig callers
+    const detail = e && e.message ? e.message.replace(/^Invalid config:\s*/, '') : String(e);
+    throw new Error(`Configuration validation failed:\n  - ${detail.split('; ').join('\n  - ')}`);
   }
 
   // Derive default reverb_host from server_url if not set
@@ -164,7 +182,9 @@ function loadConfig() {
     reverb_host: config.reverb_host || defaultReverbHost,
     reverb_port: config.reverb_port ?? 8080,
     reverb_scheme: config.reverb_scheme || 'http',
-    ws_fallback_polling_seconds: config.ws_fallback_polling_seconds ?? 30
+    ws_fallback_polling_seconds: config.ws_fallback_polling_seconds ?? 30,
+    screenshot_enabled: config.screenshot_enabled ?? true,
+    screenshot_interval_seconds: config.screenshot_interval_seconds ?? 60
   };
 
   // Log config without sensitive token
