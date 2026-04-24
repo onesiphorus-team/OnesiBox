@@ -28,28 +28,28 @@ function captureScreen({ quality = 75, timeoutMs = 8000 } = {}) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { grim.kill('SIGKILL'); } catch (_) {}
-      try { cwebp.kill('SIGKILL'); } catch (_) {}
+      try { grim.kill('SIGKILL'); } catch { /* already exited */ }
+      try { cwebp.kill('SIGKILL'); } catch { /* already exited */ }
       reject(new Error(`capture timeout after ${timeoutMs}ms`));
     }, timeoutMs);
 
     grim.stdout.on('data', (d) => {
-      try { cwebp.stdin.write(d); } catch (_) { /* cwebp may have died */ }
+      try { cwebp.stdin.write(d); } catch { /* cwebp may have died */ }
     });
     grim.stderr.on('data', (d) => { grimErr = Buffer.concat([grimErr, d]); });
     grim.on('error', (err) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { cwebp.kill('SIGKILL'); } catch (_) {}
+      try { cwebp.kill('SIGKILL'); } catch { /* already exited */ }
       reject(new Error(`grim spawn error: ${err.code || err.message}`));
     });
     grim.on('close', (code) => {
-      try { cwebp.stdin.end(); } catch (_) {}
+      try { cwebp.stdin.end(); } catch { /* stdin closed */ }
       if (code !== 0 && !settled) {
         settled = true;
         clearTimeout(timer);
-        try { cwebp.kill('SIGKILL'); } catch (_) {}
+        try { cwebp.kill('SIGKILL'); } catch { /* already exited */ }
         reject(new Error(`grim exited with code ${code}: ${grimErr.toString()}`));
       }
     });
@@ -60,7 +60,7 @@ function captureScreen({ quality = 75, timeoutMs = 8000 } = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { grim.kill('SIGKILL'); } catch (_) {}
+      try { grim.kill('SIGKILL'); } catch { /* already exited */ }
       reject(new Error(`cwebp spawn error: ${err.code || err.message}`));
     });
     cwebp.on('close', (code) => {

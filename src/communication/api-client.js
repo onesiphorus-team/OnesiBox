@@ -215,7 +215,7 @@ class ApiClient {
       try {
         await this.acknowledgeCommand(pending.commandId, pending.ack);
         logger.info('Retried ACK successfully', { commandId: pending.commandId });
-      } catch (error) {
+      } catch {
         pending.retries++;
         if (pending.retries < pending.maxRetries) {
           this.pendingAcks.push(pending);
