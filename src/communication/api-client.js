@@ -1,6 +1,7 @@
 const http = require('http');
 const https = require('https');
 const axios = require('axios');
+const FormData = require('form-data');
 const logger = require('../logging/logger');
 
 // Disable keep-alive to prevent stale connection reuse behind Cloudflare.
@@ -127,6 +128,44 @@ class ApiClient {
    */
   async reportPlaybackEvent(event) {
     await this.client.post('/appliances/playback', event);
+  }
+
+  /**
+   * Upload a diagnostic screenshot as multipart/form-data.
+   * The backend identifies the appliance via the Sanctum token.
+   *
+   * @param {object} params
+   * @param {Date} params.capturedAt - When the screenshot was captured.
+   * @param {number} params.width - Image width in pixels.
+   * @param {number} params.height - Image height in pixels.
+   * @param {Buffer} params.buffer - WebP image buffer (max 2MB).
+   * @returns {Promise<object>} Server response payload.
+   */
+  async uploadScreenshot({ capturedAt, width, height, buffer }) {
+    const MAX_BYTES = 2 * 1024 * 1024;
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+      throw new Error('uploadScreenshot: buffer required');
+    }
+    if (buffer.length > MAX_BYTES) {
+      throw new Error(`uploadScreenshot: buffer too large (${buffer.length} bytes)`);
+    }
+
+    const form = new FormData();
+    form.append('captured_at', capturedAt.toISOString());
+    form.append('width', String(width));
+    form.append('height', String(height));
+    form.append('screenshot', buffer, {
+      filename: 'screenshot.webp',
+      contentType: 'image/webp',
+    });
+
+    const response = await this.client.post(
+      '/appliances/screenshot',
+      form,
+      { headers: form.getHeaders() }
+    );
+
+    return response.data;
   }
 
   /**
