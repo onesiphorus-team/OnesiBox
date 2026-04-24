@@ -122,8 +122,6 @@ function validateConfig(config) {
   if (errors.length > 0) {
     throw new Error(`Invalid config: ${errors.join('; ')}`);
   }
-
-  return errors;
 }
 
 function loadConfig() {
@@ -184,7 +182,9 @@ function loadConfig() {
     reverb_host: config.reverb_host || defaultReverbHost,
     reverb_port: config.reverb_port ?? 8080,
     reverb_scheme: config.reverb_scheme || 'http',
-    ws_fallback_polling_seconds: config.ws_fallback_polling_seconds ?? 30
+    ws_fallback_polling_seconds: config.ws_fallback_polling_seconds ?? 30,
+    screenshot_enabled: config.screenshot_enabled ?? true,
+    screenshot_interval_seconds: config.screenshot_interval_seconds ?? 60
   };
 
   // Log config without sensitive token

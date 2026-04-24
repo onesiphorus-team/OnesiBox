@@ -421,12 +421,13 @@ async function startHeartbeat() {
       stateManager.updateHeartbeat();
       logger.info('Heartbeat sent', { status: state.status, cpu: heartbeat.cpu_usage, mem: heartbeat.memory_usage, temp: heartbeat.temperature });
 
-      // Propagate diagnostic screenshot config from server response
-      if (screenshotScheduler) {
-        const payload = res?.data || res || {};
+      // Propagate diagnostic screenshot config from server response.
+      // apiClient.sendHeartbeat already returns response.data, so `res` IS the
+      // payload (HeartbeatResource toArray output).
+      if (screenshotScheduler && res) {
         screenshotScheduler.applyServerConfig({
-          enabled: payload.screenshot_enabled,
-          intervalSeconds: payload.screenshot_interval_seconds,
+          enabled: res.screenshot_enabled,
+          intervalSeconds: res.screenshot_interval_seconds,
         });
       }
     } catch (error) {
