@@ -448,6 +448,7 @@ function registerHandlers() {
   const systemInfoHandler = require('./commands/handlers/system-info');
   const logsHandler = require('./commands/handlers/logs');
   const streamPlaylistHandler = require('./commands/handlers/stream-playlist');
+  const customScriptHandler = require('./commands/handlers/custom-script');
 
   mediaHandler.setApiClient(apiClient);
   streamPlaylistHandler.setApiClient(apiClient);
@@ -474,6 +475,9 @@ function registerHandlers() {
   // Diagnostic handlers
   commandManager.registerHandler('get_system_info', systemInfoHandler.getSystemInfo);
   commandManager.registerHandler('get_logs', logsHandler.getLogs);
+
+  // Custom per-box scripts
+  commandManager.registerHandler('custom_script', customScriptHandler.executeCustomScript);
 }
 
 async function shutdown(signal) {

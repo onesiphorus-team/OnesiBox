@@ -39,8 +39,19 @@ const ERROR_CODES = {
   STREAM_NAV_FAILED: 'E110',
   PLAYLIST_LOAD_FAILED: 'E111',
   ORDINAL_OUT_OF_RANGE: 'E112',
-  VIDEO_START_FAILED: 'E113'
+  VIDEO_START_FAILED: 'E113',
+
+  // Custom script errors
+  CUSTOM_SCRIPT_FAILED: 'E114',
+  CUSTOM_SCRIPT_NOT_FOUND: 'E115',
+  CUSTOM_SCRIPT_INVALID_NAME: 'E116'
 };
+
+/**
+ * Regex matching allowed custom script basenames.
+ * Mirrors CustomCommand::SCRIPT_NAME_REGEX on the server.
+ */
+const CUSTOM_SCRIPT_NAME_REGEX = /^[a-zA-Z0-9_.-]+\.sh$/;
 
 /**
  * Allowed base domains for media playback.
@@ -82,7 +93,8 @@ const COMMAND_TYPES = [
   'shutdown',
   'restart_service',
   'get_system_info',
-  'get_logs'
+  'get_logs',
+  'custom_script'
 ];
 
 /**
@@ -355,6 +367,20 @@ function validateCommand(command) {
     case 'restart_service':
       // No payload required
       break;
+
+    case 'custom_script':
+      if (typeof command.payload?.script_name !== 'string' ||
+          !CUSTOM_SCRIPT_NAME_REGEX.test(command.payload.script_name)) {
+        errors.push('custom_script requires a safe script_name basename matching ' +
+          CUSTOM_SCRIPT_NAME_REGEX.toString());
+      }
+      if (command.payload?.static_args !== undefined) {
+        if (!Array.isArray(command.payload.static_args) ||
+            !command.payload.static_args.every(a => typeof a === 'string')) {
+          errors.push('custom_script static_args must be an array of strings');
+        }
+      }
+      break;
   }
 
   if (errors.length > 0) {
@@ -413,6 +439,8 @@ function getErrorCodeForCommandType(commandType) {
     case 'get_system_info':
     case 'get_logs':
       return ERROR_CODES.DIAGNOSTICS_HANDLER_FAILED;
+    case 'custom_script':
+      return ERROR_CODES.CUSTOM_SCRIPT_FAILED;
     default:
       return ERROR_CODES.INVALID_COMMAND_STRUCTURE;
   }
