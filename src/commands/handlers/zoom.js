@@ -21,13 +21,13 @@ const ZOOM_MEETING_HOST_PATTERN = /(^|\.)zoom\.us$/i;
 const ZOOM_MEETING_PATH_PATTERN = /\/wc\//;
 
 // Phrases that Zoom shows on the "meeting ended" / "removed by host" screens, in EN/IT.
+// Only full sentences specific enough that they wouldn't appear naturally in chat —
+// short phrases like "meeting ended" or "riunione terminata" are excluded to avoid
+// false positives if a participant happens to type them after the 1h 45m mark.
 const MEETING_ENDED_PHRASES = [
   'this meeting has been ended',
   'the host has ended this meeting',
-  'meeting ended',
-  'meeting has ended',
   "l'host ha terminato",
-  'riunione terminata',
   'la riunione è stata terminata',
   'è stata terminata dall',
 ];
@@ -159,7 +159,11 @@ async function checkMeetingEnded(activePage) {
   }
 
   try {
-    const bodyText = await activePage.evaluate(() => document.body?.innerText || '');
+    // Cap to 8KB: end-of-meeting banners are short and live near the top of body,
+    // so we don't need (and shouldn't ship over IPC) a full chat transcript.
+    const bodyText = await activePage.evaluate(
+      () => (document.body?.innerText || '').slice(0, 8192)
+    );
     const normalized = bodyText.toLowerCase();
     if (MEETING_ENDED_PHRASES.some((phrase) => normalized.includes(phrase))) {
       return true;
