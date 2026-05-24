@@ -8,9 +8,38 @@ const { isZoomUrl } = require('../validator');
 // Directory for persistent browser profile
 const USER_DATA_DIR = path.join(os.homedir(), '.onesibox-zoom');
 
+// Delay before starting end-of-meeting polling (1h 45m).
+// Meetings typically don't end before this, so we don't waste cycles polling early.
+const END_DETECTION_START_DELAY_MS = 105 * 60 * 1000;
+
+// How often to poll the Zoom page once detection starts.
+const END_DETECTION_POLL_INTERVAL_MS = 30 * 1000;
+
+// Hostnames considered "still inside a Zoom meeting". Anything else (Zoom redirects to
+// us02web.zoom.us / zoom.us "leave_url" / about:blank when the host ends) means we're out.
+const ZOOM_MEETING_HOST_PATTERN = /(^|\.)zoom\.us$/i;
+const ZOOM_MEETING_PATH_PATTERN = /\/wc\//;
+
+// Phrases that Zoom shows on the "meeting ended" / "removed by host" screens, in EN/IT.
+const MEETING_ENDED_PHRASES = [
+  'this meeting has been ended',
+  'the host has ended this meeting',
+  'meeting ended',
+  'meeting has ended',
+  "l'host ha terminato",
+  'riunione terminata',
+  'la riunione è stata terminata',
+  'è stata terminata dall',
+];
+
 // Playwright browser context (persists between calls)
 let browserContext = null;
 let page = null;
+
+// End-of-meeting detection timers (module-level so they can be cleared from any handler).
+let endDetectionStartTimer = null;
+let endDetectionPollInterval = null;
+let endDetectionTicking = false;
 
 /**
  * Convert Zoom meeting URL to web client format.
@@ -80,6 +109,7 @@ function parseZoomUrl(url) {
  * Close existing Playwright browser context if open.
  */
 async function closeBrowserContext() {
+  stopMeetingEndDetection();
   if (browserContext) {
     try {
       await browserContext.close();
@@ -88,6 +118,150 @@ async function closeBrowserContext() {
     }
     browserContext = null;
     page = null;
+  }
+}
+
+/**
+ * Check whether the current Playwright page is on a "meeting ended" state.
+ *
+ * Looks at both URL (Zoom navigates away from /wc/ when the host ends) and visible
+ * page text ("Meeting Ended", "L'host ha terminato la riunione", etc.). Returns true
+ * if any signal indicates the meeting is no longer active.
+ *
+ * @param {import('playwright').Page} activePage
+ * @returns {Promise<boolean>}
+ */
+async function checkMeetingEnded(activePage) {
+  if (!activePage || activePage.isClosed()) {
+    return true;
+  }
+
+  let currentUrl;
+  try {
+    currentUrl = activePage.url();
+  } catch {
+    return true;
+  }
+
+  if (!currentUrl || currentUrl === 'about:blank') {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(currentUrl);
+    const hostMatches = ZOOM_MEETING_HOST_PATTERN.test(parsed.hostname);
+    const pathMatches = ZOOM_MEETING_PATH_PATTERN.test(parsed.pathname);
+    if (!hostMatches || !pathMatches) {
+      return true;
+    }
+  } catch {
+    return true;
+  }
+
+  try {
+    const bodyText = await activePage.evaluate(() => document.body?.innerText || '');
+    const normalized = bodyText.toLowerCase();
+    if (MEETING_ENDED_PHRASES.some((phrase) => normalized.includes(phrase))) {
+      return true;
+    }
+  } catch (error) {
+    logger.warn('Failed to read Zoom page body for end detection', { error: error.message });
+  }
+
+  return false;
+}
+
+/**
+ * Stop both the deferred start timer and the active polling interval, if any.
+ */
+function stopMeetingEndDetection() {
+  if (endDetectionStartTimer) {
+    clearTimeout(endDetectionStartTimer);
+    endDetectionStartTimer = null;
+  }
+  if (endDetectionPollInterval) {
+    clearInterval(endDetectionPollInterval);
+    endDetectionPollInterval = null;
+  }
+  endDetectionTicking = false;
+}
+
+/**
+ * Schedule end-of-meeting polling. After END_DETECTION_START_DELAY_MS we start polling
+ * the Playwright page every END_DETECTION_POLL_INTERVAL_MS. When `checkMeetingEnded`
+ * returns true, we tear down the browser context and update state — same effect as a
+ * manual `leaveZoom`, but triggered by the host closing the meeting.
+ *
+ * @param {object} browserController - Used to keep the main kiosk browser in standby.
+ */
+function startMeetingEndDetection(browserController) {
+  stopMeetingEndDetection();
+
+  logger.info('Scheduling Zoom end-of-meeting detection', {
+    start_delay_ms: END_DETECTION_START_DELAY_MS,
+    poll_interval_ms: END_DETECTION_POLL_INTERVAL_MS,
+  });
+
+  endDetectionStartTimer = setTimeout(() => {
+    endDetectionStartTimer = null;
+
+    if (!browserContext || !page) {
+      logger.info('End-detection start fired but no active Zoom session, skipping');
+      return;
+    }
+
+    logger.info('Starting Zoom end-of-meeting polling');
+    endDetectionPollInterval = setInterval(
+      () => runEndDetectionTick(browserController),
+      END_DETECTION_POLL_INTERVAL_MS
+    );
+  }, END_DETECTION_START_DELAY_MS);
+}
+
+/**
+ * One polling tick: read the page, and if the meeting has ended, clean up.
+ * Guarded against re-entrance so a slow page evaluation can't overlap with itself.
+ *
+ * @param {object} browserController
+ */
+async function runEndDetectionTick(browserController) {
+  if (endDetectionTicking) {
+    return;
+  }
+  endDetectionTicking = true;
+
+  try {
+    const activePage = page;
+    if (!browserContext || !activePage) {
+      stopMeetingEndDetection();
+      return;
+    }
+
+    const ended = await checkMeetingEnded(activePage);
+    if (!ended) {
+      return;
+    }
+
+    logger.info('Detected Zoom meeting ended by host, cleaning up');
+
+    stopMeetingEndDetection();
+    await closeBrowserContext();
+
+    if (stateManager.getState().status === STATUS.CALLING) {
+      stateManager.leaveMeeting();
+    }
+
+    if (browserController && typeof browserController.goToStandby === 'function') {
+      try {
+        await browserController.goToStandby();
+      } catch (error) {
+        logger.warn('Failed to return main browser to standby after Zoom end', { error: error.message });
+      }
+    }
+  } catch (error) {
+    logger.warn('End-of-meeting tick failed', { error: error.message });
+  } finally {
+    endDetectionTicking = false;
   }
 }
 
@@ -224,6 +398,9 @@ async function joinZoom(command, browserController) {
       meeting_id: parsedUrl.meetingId
     });
 
+    // Schedule background detection of host-ended meetings.
+    startMeetingEndDetection(browserController);
+
     logger.info('Zoom meeting join initiated', {
       meeting_id: parsedUrl.meetingId,
       participant_name
@@ -270,6 +447,8 @@ async function leaveZoom(_command, _browserController) {
   logger.info('Leaving Zoom meeting', {
     meeting_id: currentState.currentMeeting?.meeting_id
   });
+
+  stopMeetingEndDetection();
 
   try {
     if (page) {
@@ -328,6 +507,7 @@ async function leaveZoom(_command, _browserController) {
  */
 async function cleanup() {
   logger.info('Cleaning up Zoom resources');
+  stopMeetingEndDetection();
   await closeBrowserContext();
 }
 
@@ -345,5 +525,10 @@ module.exports = {
   parseZoomUrl,
   convertToWebClientUrl,
   cleanup,
-  isZoomActive
+  isZoomActive,
+  checkMeetingEnded,
+  startMeetingEndDetection,
+  stopMeetingEndDetection,
+  END_DETECTION_START_DELAY_MS,
+  END_DETECTION_POLL_INTERVAL_MS,
 };
