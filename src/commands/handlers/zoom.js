@@ -146,6 +146,7 @@ async function joinZoom(command, browserController) {
         '--disable-dev-shm-usage',
         '--start-fullscreen',
         '--autoplay-policy=no-user-gesture-required',
+        '--password-store=basic',
       ],
       permissions: ['microphone', 'camera'],
       viewport: null, // Fullscreen
