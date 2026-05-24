@@ -20,7 +20,9 @@ const COMMAND_PRIORITY = {
   set_volume: 3,
   // Diagnostics - lowest priority (can wait)
   get_system_info: 4,
-  get_logs: 4
+  get_logs: 4,
+  // Custom shell scripts - medium priority, run alongside media
+  custom_script: 2
 };
 
 class CommandManager extends EventEmitter {
