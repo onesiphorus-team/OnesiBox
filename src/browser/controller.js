@@ -101,6 +101,7 @@ class BrowserController {
         '--disable-background-networking',
         '--disable-sync',
         '--disable-default-apps',
+        '--password-store=basic',
       ];
       logger.info('Dev mode: using windowed browser args (no kiosk/fullscreen/no-sandbox)');
     } else {
@@ -119,6 +120,7 @@ class BrowserController {
         '--disable-default-apps',
         '--start-fullscreen',
         '--no-sandbox',
+        '--password-store=basic',
       ];
     }
 
