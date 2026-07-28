@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../logging/logger');
 const { isUrlAllowed, isZoomUrl } = require('../commands/validator');
+const { COMMON_ARGS, WAYLAND_ARGS } = require('./chromium-args');
 
 const LOCAL_PORT = process.env.PORT || 3000;
 const STANDBY_URL = `http://localhost:${LOCAL_PORT}`;
@@ -89,46 +90,19 @@ class BrowserController {
     if (IS_DEV_MODE) {
       // Dev mode (macOS/local): windowed, no kiosk, no sandbox flag.
       // Keep the args that only affect behavior (no UI takeover).
-      this.launchArgs = [
-        '--noerrdialogs',
-        '--disable-infobars',
-        '--no-first-run',
-        '--autoplay-policy=no-user-gesture-required',
-        '--disable-session-crashed-bubble',
-        '--disable-features=TranslateUI',
-        '--check-for-update-interval=31536000',
-        '--disable-component-update',
-        '--disable-background-networking',
-        '--disable-sync',
-        '--disable-default-apps',
-        '--password-store=basic',
-      ];
+      this.launchArgs = [...COMMON_ARGS];
       logger.info('Dev mode: using windowed browser args (no kiosk/fullscreen/no-sandbox)');
     } else {
       this.launchArgs = [
         '--kiosk',
-        '--noerrdialogs',
-        '--disable-infobars',
-        '--no-first-run',
-        '--autoplay-policy=no-user-gesture-required',
-        '--disable-session-crashed-bubble',
-        '--disable-features=TranslateUI',
-        '--check-for-update-interval=31536000',
-        '--disable-component-update',
-        '--disable-background-networking',
-        '--disable-sync',
-        '--disable-default-apps',
+        ...COMMON_ARGS,
         '--start-fullscreen',
         '--no-sandbox',
-        '--password-store=basic',
       ];
     }
 
     if (isWayland) {
-      this.launchArgs.push(
-        '--ozone-platform=wayland',
-        '--enable-features=UseOzonePlatform'
-      );
+      this.launchArgs.push(...WAYLAND_ARGS);
       logger.info('Added Wayland-specific browser flags');
     }
 
