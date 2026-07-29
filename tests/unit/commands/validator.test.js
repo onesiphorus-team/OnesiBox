@@ -1,4 +1,10 @@
-const { isUrlAllowed, isZoomUrl, isStreamJwUrl, validateCommand } = require('../../../src/commands/validator');
+const {
+  isUrlAllowed,
+  isZoomUrl,
+  isStreamJwUrl,
+  validateCommand,
+  MAX_URL_LENGTH
+} = require('../../../src/commands/validator');
 
 describe('URL Validator', () => {
   describe('isUrlAllowed', () => {
@@ -43,6 +49,50 @@ describe('URL Validator', () => {
     it('should reject non-Zoom URLs', () => {
       expect(isZoomUrl('https://youtube.com/watch')).toBe(false);
       expect(isZoomUrl('https://zoom.com.fake.com/j/123')).toBe(false);
+    });
+
+    it('should reject suffix-injection attempts on zoom.us', () => {
+      expect(isZoomUrl('https://zoom.us.attacker.io/j/123')).toBe(false);
+      expect(isZoomUrl('https://us02web.zoom.us.attacker.io/j/123')).toBe(false);
+      expect(isZoomUrl('https://evilzoom.us.io/j/123')).toBe(false);
+    });
+
+    it('should reject hostnames that merely end with "zoom.us" without the dot', () => {
+      expect(isZoomUrl('https://evilzoom.us/j/123')).toBe(false);
+      expect(isZoomUrl('https://notzoom.us/j/123')).toBe(false);
+    });
+
+    it('should reject an empty or malformed subdomain part', () => {
+      expect(isZoomUrl('https://.zoom.us/j/123')).toBe(false);
+      expect(isZoomUrl('https://bad_sub.zoom.us/j/123')).toBe(false);
+    });
+
+    it('should reject credentials pointing the real host elsewhere', () => {
+      expect(isZoomUrl('https://zoom.us@evil.example.com/j/123')).toBe(false);
+    });
+
+    it('should reject HTTP (no TLS)', () => {
+      expect(isZoomUrl('http://zoom.us/j/123')).toBe(false);
+      expect(isZoomUrl('http://us02web.zoom.us/j/123')).toBe(false);
+    });
+
+    it('should reject non-standard ports', () => {
+      expect(isZoomUrl('https://zoom.us:9999/j/123')).toBe(false);
+      expect(isZoomUrl('https://us02web.zoom.us:8443/j/123')).toBe(false);
+      // The default HTTPS port stays acceptable (URL parsing drops it).
+      expect(isZoomUrl('https://zoom.us:443/j/123')).toBe(true);
+    });
+
+    it('should reject URLs exceeding max length', () => {
+      const longPath = 'a'.repeat(3000);
+      expect(isZoomUrl(`https://zoom.us/j/${longPath}`)).toBe(false);
+      expect(`https://zoom.us/j/${longPath}`.length).toBeGreaterThan(MAX_URL_LENGTH);
+    });
+
+    it('should reject invalid URLs', () => {
+      expect(isZoomUrl('not-a-url')).toBe(false);
+      expect(isZoomUrl('')).toBe(false);
+      expect(isZoomUrl(null)).toBe(false);
     });
   });
 
@@ -217,6 +267,63 @@ describe('Command Validator', () => {
       });
       expect(asNonBool.valid).toBe(false);
       expect(asNonBool.errors.join(' ')).toMatch(/include_heartbeats/);
+    });
+  });
+
+  describe('validateCommand — join_zoom', () => {
+    const ZOOM_URL_ERROR = 'join_zoom meeting_url must be a valid Zoom URL';
+
+    const baseCmd = () => ({
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      type: 'join_zoom',
+      payload: {
+        meeting_url: 'https://us02web.zoom.us/j/123456789?pwd=abc'
+      }
+    });
+
+    const rejects = (meetingUrl) => {
+      const cmd = baseCmd();
+      cmd.payload.meeting_url = meetingUrl;
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain(ZOOM_URL_ERROR);
+    };
+
+    it('should accept a valid join_zoom command', () => {
+      const result = validateCommand(baseCmd());
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should reject missing meeting_url', () => {
+      const cmd = baseCmd();
+      delete cmd.payload.meeting_url;
+      const result = validateCommand(cmd);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('join_zoom requires meeting_url in payload');
+    });
+
+    it('should reject a meeting_url on an unrelated host', () => {
+      // Meeting ID and password would still be extracted and joined with
+      // microphone and camera enabled, so this must never validate.
+      rejects('https://evil.example.com/j/999888777?pwd=segreto');
+    });
+
+    it('should reject suffix-injection on the zoom.us domain', () => {
+      rejects('https://zoom.us.attacker.io/j/999888777?pwd=segreto');
+      rejects('https://evilzoom.us.io/j/999888777');
+    });
+
+    it('should reject a meeting_url on a non-standard port', () => {
+      rejects('https://zoom.us:9999/j/999888777');
+    });
+
+    it('should reject a meeting_url over the max length', () => {
+      rejects(`https://zoom.us/j/${'9'.repeat(3000)}`);
+    });
+
+    it('should reject an HTTP meeting_url', () => {
+      rejects('http://zoom.us/j/999888777');
     });
   });
 
