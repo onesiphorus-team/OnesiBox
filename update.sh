@@ -79,6 +79,12 @@ run_pending_migrations() {
     # Load executed migrations
     local executed=()
     if [[ -f "${STATE_FILE}" ]]; then
+        # Se il file esiste ma non è leggibile lo si tratterebbe come vuoto,
+        # rieseguendo migrazioni già applicate: meglio fermarsi.
+        if [[ ! -r "${STATE_FILE}" ]]; then
+            log "ERROR" "State file not readable: ${STATE_FILE}"
+            return 1
+        fi
         while IFS= read -r line; do
             [[ -n "$line" ]] && executed+=("$line")
         done < "${STATE_FILE}"
@@ -86,6 +92,7 @@ run_pending_migrations() {
 
     # Find and run new migrations (sorted alphabetically)
     local has_new=false
+    local migration_rc=0
     for migration in $(find "${migrations_dir}" -maxdepth 1 -name "*.sh" -type f | sort); do
         [[ -f "$migration" ]] || continue
 
@@ -110,13 +117,28 @@ run_pending_migrations() {
         has_new=true
         log "INFO" "Running migration: ${name}"
 
-        # Execute migration
-        if bash "$migration" 2>&1 | while IFS= read -r line; do log "INFO" "  ${line}"; done; then
+        # Execute migration.
+        #
+        # L'esito va letto da PIPESTATUS[0]: lo stato di uscita della pipeline
+        # è quello del `while`, che riesce sempre, quindi testare direttamente
+        # la pipeline marcherebbe come completata anche una migrazione fallita.
+        #
+        # Volutamente NON si abilita `set -o pipefail` a livello di script:
+        # cambierebbe anche `git diff --name-only ... | grep -q` più sotto, dove
+        # grep esce al primo match e fa arrivare SIGPIPE a git (stato 141), con
+        # il risultato di saltare `npm install` in modo non deterministico.
+        bash "$migration" 2>&1 | while IFS= read -r line; do log "INFO" "  ${line}"; done
+        migration_rc=${PIPESTATUS[0]}
+
+        if [[ "$migration_rc" -eq 0 ]]; then
             # Mark as executed
-            echo "$name" >> "${STATE_FILE}"
+            if ! echo "$name" >> "${STATE_FILE}"; then
+                log "ERROR" "Cannot record migration state in ${STATE_FILE}"
+                return 1
+            fi
             log "INFO" "Migration completed: ${name}"
         else
-            log "ERROR" "Migration failed: ${name}"
+            log "ERROR" "Migration failed: ${name} (exit ${migration_rc})"
             # Don't continue with other migrations if one fails
             return 1
         fi
@@ -213,7 +235,10 @@ main() {
         log "INFO" "Already up to date"
 
         # Still run pending migrations (in case previous update failed)
-        run_pending_migrations
+        if ! run_pending_migrations; then
+            log "ERROR" "=== Update Check FAILED: pending migrations not applied ==="
+            exit 1
+        fi
         log "INFO" "=== Update Check Complete ==="
         exit 0
     fi
@@ -236,7 +261,10 @@ main() {
     fi
 
     # Run migrations
-    run_pending_migrations
+    if ! run_pending_migrations; then
+        log "ERROR" "=== Update FAILED: migration error on ${NEW_COMMIT:0:7} ==="
+        exit 1
+    fi
 
     # Restart service
     restart_service
