@@ -242,13 +242,28 @@ ssh pi@INDIRIZZO_IP
 Esegui questo comando per scaricare e avviare l'installatore:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
 ```
 
 > 💡 Se il comando sopra non funziona, prova:
 > ```bash
 > wget -qO- https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
 > ```
+
+> ⚠️ Esegui il comando da un terminale (la sessione SSH del punto precedente va
+> bene): l'installatore ti farà alcune domande e le legge dal terminale. Se non
+> trova un terminale si ferma subito, dicendolo a schermo, senza installare
+> nulla a metà.
+>
+> Per un'installazione **senza domande** (per esempio da uno script di
+> provisioning) aggiungi le risposte al comando:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh \
+>   | sudo bash -s -- --non-interactive --token IL_TUO_TOKEN --name "Casa Nonna Maria"
+> ```
+>
+> L'elenco completo delle opzioni: `sudo ./install.sh --help`.
 
 ### 5.3 Segui la procedura guidata
 

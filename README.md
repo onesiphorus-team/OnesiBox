@@ -225,17 +225,38 @@ Lo script interattivo guida attraverso l'intera installazione:
 
 ```bash
 # Scarica ed esegui in un comando (richiede connessione internet)
-curl -sSL https://raw.githubusercontent.com/onesiphorus-team/onesibox-client/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
 
 # Oppure, se hai già clonato il repository:
 sudo ./install.sh
 ```
+
+Anche con la pipe l'installazione resta interattiva: le domande vengono lette dal
+terminale (`/dev/tty`), non da stdin che è occupato dallo script stesso. Serve
+quindi una sessione con un terminale (una normale SSH va bene).
 
 Lo script chiederà:
 1. **Nome dispositivo** - Un nome descrittivo (es: "Casa Nonna Maria")
 2. **URL del server** - L'indirizzo del pannello Onesiforo
 3. **Appliance ID** - UUID del dispositivo (o ne genera uno automatico)
 4. **Token** - Il token di autenticazione dal server
+
+### Installazione Non Interattiva
+
+Per provisioning automatico o sessioni senza terminale (cron, CI, `ssh` senza
+tty) tutti i dati si passano da opzioni o variabili d'ambiente:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh \
+  | sudo bash -s -- --non-interactive \
+      --token IL_TUO_TOKEN \
+      --name "Casa Nonna Maria" \
+      --appliance-id UUID_DAL_PANNELLO
+```
+
+Se manca un dato obbligatorio lo script si ferma **prima** di modificare il
+sistema, con un errore esplicito e codice di uscita diverso da zero. L'elenco
+completo di opzioni e variabili è in `sudo ./install.sh --help`.
 
 ### Riconfigurazione
 
