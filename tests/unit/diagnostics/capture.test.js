@@ -110,6 +110,25 @@ describe('captureScreen', () => {
     await expect(captureScreen({ timeoutMs: 5000 })).rejects.toThrow(/ENOENT/);
   });
 
+  it('kills grim when the cwebp spawn throws synchronously', async () => {
+    const grim = fakeChild();
+    spawn
+      .mockImplementationOnce(() => grim)
+      .mockImplementationOnce(() => {
+        // EMFILE/EAGAIN under file-descriptor exhaustion throw synchronously,
+        // unlike ENOENT which arrives as an async 'error' event.
+        const err = new Error('spawn EMFILE');
+        err.code = 'EMFILE';
+        throw err;
+      });
+
+    await expect(captureScreen({ timeoutMs: 5000 })).rejects.toThrow(/EMFILE/);
+
+    // Without this, grim survives the rejection blocked on a pipe nobody
+    // reads: one orphan per tick on a Pi that runs for months.
+    expect(grim.kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
   it('kills children and rejects on timeout', async () => {
     const grim = fakeChild();
     const cwebp = fakeChild();

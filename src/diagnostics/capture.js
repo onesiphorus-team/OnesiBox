@@ -20,6 +20,12 @@ function captureScreen({ quality = 75, timeoutMs = 8000 } = {}) {
       // terminated. Without it: "Error! Unknown option '-'" and exit code 1.
       cwebp = spawn('cwebp', ['-q', String(quality), '-o', '-', '--', '-'], { env });
     } catch (err) {
+      // Only EMFILE/EAGAIN-style failures throw synchronously (ENOENT arrives
+      // as an async 'error' event). If cwebp is the one that failed, grim is
+      // already running and would stay blocked writing into a pipe nobody
+      // reads: one orphan per tick on a box that runs for months.
+      try { grim?.kill('SIGKILL'); } catch { /* never started */ }
+      try { cwebp?.kill('SIGKILL'); } catch { /* never started */ }
       return reject(new Error(`spawn failed: ${err.code || err.message}`));
     }
 
