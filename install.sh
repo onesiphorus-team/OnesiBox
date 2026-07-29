@@ -173,6 +173,9 @@ Variabili d'ambiente equivalenti:
   ONESIBOX_SERVER_URL        ONESIBOX_APPLIANCE_ID      ONESIBOX_APPLIANCE_TOKEN
   ONESIBOX_POLLING_INTERVAL  ONESIBOX_HEARTBEAT_INTERVAL ONESIBOX_DEFAULT_VOLUME
   ONESIBOX_AUTO_UPDATES      ONESIBOX_KEEP_CONFIG
+
+Nota: --token compare nella lista dei processi (ps) e nella cronologia della
+shell. Su macchine condivise preferisci ONESIBOX_APPLIANCE_TOKEN.
 EOF
 }
 

@@ -258,6 +258,10 @@ Se manca un dato obbligatorio lo script si ferma **prima** di modificare il
 sistema, con un errore esplicito e codice di uscita diverso da zero. L'elenco
 completo di opzioni e variabili è in `sudo ./install.sh --help`.
 
+> `--token` compare nella lista dei processi (`ps`) e nella cronologia della
+> shell: su macchine condivise passa il token dalla variabile d'ambiente
+> `ONESIBOX_APPLIANCE_TOKEN`.
+
 ### Riconfigurazione
 
 Per cambiare server, token o altre impostazioni senza reinstallare:
