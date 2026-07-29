@@ -9,7 +9,7 @@
     "dev:mac": "ONESIBOX_DEV_MODE=1 ONESIBOX_DATA_DIR=./.dev-data NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/Herd/config/valet/CA/HerdCASelfSigned.pem\" node src/main.js",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:shell": "bash tests/shell/install-sh.test.sh",
+    "test:shell": "bash tests/shell/install-sh.test.sh && bash tests/shell/update-sh.test.sh",
     "lint": "eslint src/"
   },
   "keywords": [
