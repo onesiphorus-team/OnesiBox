@@ -82,6 +82,11 @@ class ScreenshotScheduler {
           this.logger.error('screenshot: grim or cwebp not found (ENOENT), disabling until config refresh', { err: err.message });
           this.envErrorLogged = true;
         }
+        // Clearing `enabled` is what makes the log message true: it lets the
+        // next heartbeat carrying enabled=true restart the timer. Leaving it
+        // set would strand the scheduler until the service restarts, because
+        // no branch of applyServerConfig can start a timer from that state.
+        this.enabled = false;
         this.stop();
         return;
       }

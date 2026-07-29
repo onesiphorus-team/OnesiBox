@@ -135,6 +135,53 @@ describe('ScreenshotScheduler error handling', () => {
     expect(mockLogger.error.mock.calls.length).toBe(errorCallsBefore);
   });
 
+  // The ENOENT log promises "disabling until config refresh". Unless `enabled`
+  // is actually cleared, no branch of applyServerConfig can ever restart the
+  // timer again (the first needs !enabled, the second !wasEnabled, the third a
+  // live timer), so grim/cwebp disappearing during a package upgrade would kill
+  // screenshots until the service is restarted.
+  it('on ENOENT clears the enabled flag so a later heartbeat can restart it', async () => {
+    const err = new Error('grim ENOENT');
+    err.code = 'ENOENT';
+    mockCapture.mockRejectedValue(err);
+
+    scheduler.start();
+    jest.advanceTimersByTime(60000);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(scheduler.enabled).toBe(false);
+    expect(scheduler.timer).toBeNull();
+  });
+
+  it('restarts capturing when the server re-enables screenshots after ENOENT', async () => {
+    const err = new Error('grim ENOENT');
+    err.code = 'ENOENT';
+    mockCapture.mockRejectedValue(err);
+
+    scheduler.start();
+    jest.advanceTimersByTime(60000);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const callsAfterEnoent = mockCapture.mock.calls.length;
+
+    // grim/cwebp are back (e.g. the package upgrade finished) and the next
+    // heartbeat still reports screenshots as enabled.
+    mockCapture.mockResolvedValue(Buffer.from([0x52, 0x49, 0x46, 0x46]));
+    scheduler.applyServerConfig({ enabled: true, intervalSeconds: 60 });
+
+    jest.advanceTimersByTime(60000);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockCapture.mock.calls.length).toBe(callsAfterEnoent + 1);
+    expect(mockApiClient.uploadScreenshot).toHaveBeenCalledTimes(1);
+  });
+
   it('on HTTP 5xx logs warn and continues', async () => {
     mockCapture.mockResolvedValue(Buffer.from([0x52, 0x49, 0x46, 0x46]));
     mockApiClient.uploadScreenshot.mockRejectedValueOnce(new Error('Request failed with status code 503'));

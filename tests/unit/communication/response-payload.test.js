@@ -1,12 +1,4 @@
 const { unwrapPayload } = require('../../../src/communication/response-payload');
-const ScreenshotScheduler = require('../../../src/diagnostics/screenshot-scheduler');
-
-const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn()
-};
 
 // Real shape returned by the Laravel backend: HeartbeatResource is wrapped in
 // a `data` key because the project never calls JsonResource::withoutWrapping().
@@ -45,55 +37,27 @@ describe('unwrapPayload', () => {
     const payload = { data: 'ok', screenshot_enabled: true };
     expect(unwrapPayload(payload)).toEqual(payload);
   });
-});
 
-describe('heartbeat screenshot config propagation', () => {
-  function makeScheduler() {
-    return new ScreenshotScheduler({
-      apiClient: {},
-      logger: mockLogger,
-      config: { screenshot_enabled: true, screenshot_interval_seconds: 60 }
-    });
-  }
+  // Collection endpoints wrap a list the same way: /appliances/commands returns
+  // { data: [...], meta: {...} }. Returning the envelope there would silently
+  // hand a caller the wrapper instead of the commands.
+  it('unwraps a Laravel Resource collection to the array itself', () => {
+    const commands = [{ uuid: 'a', type: 'reboot' }, { uuid: 'b', type: 'set_volume' }];
+    const body = { data: commands, meta: { total: 2, pending: 2 } };
 
-  it('applies enabled/intervalSeconds from a wrapped heartbeat response', () => {
-    const scheduler = makeScheduler();
-    const payload = unwrapPayload(WRAPPED_HEARTBEAT);
-
-    scheduler.applyServerConfig({
-      enabled: payload.screenshot_enabled,
-      intervalSeconds: payload.screenshot_interval_seconds
-    });
-
-    expect(scheduler.enabled).toBe(false);
-    expect(scheduler.intervalSeconds).toBe(120);
-    scheduler.stop();
+    expect(unwrapPayload(body)).toBe(commands);
   });
 
-  it('applies enabled/intervalSeconds from an unwrapped heartbeat response', () => {
-    const scheduler = makeScheduler();
-    const payload = unwrapPayload({ screenshot_enabled: false, screenshot_interval_seconds: 300 });
-
-    scheduler.applyServerConfig({
-      enabled: payload.screenshot_enabled,
-      intervalSeconds: payload.screenshot_interval_seconds
-    });
-
-    expect(scheduler.enabled).toBe(false);
-    expect(scheduler.intervalSeconds).toBe(300);
-    scheduler.stop();
+  it('unwraps an empty Laravel Resource collection to an empty array', () => {
+    expect(unwrapPayload({ data: [], meta: { total: 0 } })).toEqual([]);
   });
 
-  it('regression: reading the wrapped response directly changes nothing', () => {
-    const scheduler = makeScheduler();
-
-    scheduler.applyServerConfig({
-      enabled: WRAPPED_HEARTBEAT.screenshot_enabled,
-      intervalSeconds: WRAPPED_HEARTBEAT.screenshot_interval_seconds
-    });
-
-    expect(scheduler.enabled).toBe(true);
-    expect(scheduler.intervalSeconds).toBe(60);
-    scheduler.stop();
+  it('returns null for a bare top-level array, which is not a Resource envelope', () => {
+    expect(unwrapPayload([{ uuid: 'a' }])).toBeNull();
+    expect(unwrapPayload([])).toBeNull();
   });
 });
+
+// The heartbeat propagation tests that used to live here reimplemented the
+// production glue inline, so they could not fail for any change to src/. They
+// now exercise the real function: see heartbeat-response.test.js.
