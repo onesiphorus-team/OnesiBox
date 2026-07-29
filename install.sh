@@ -904,10 +904,15 @@ install_application() {
     print_success "Dipendenze npm installate"
 
     # Installa dipendenze e browser Playwright (necessario per Zoom web client)
-    # `playwright install-deps` invoca apt a sua volta: DEBIAN_FRONTEND è
-    # esportato, quindi la variabile arriva anche a quel apt.
+    # `playwright install-deps` invoca apt a sua volta, ma DEBIAN_FRONTEND non
+    # ci arriva da sola: sudoers ha `Defaults env_reset` e la variabile non è
+    # nella env_keep predefinita (verificato su Raspberry Pi OS: dopo
+    # `sudo -u utente` risulta a zero occorrenze). Va quindi passata esplicita.
+    # Lo stdin di quell'apt è comunque /dev/null grazie a run_system, quindi non
+    # potrebbe consumare il sorgente dello script: questo serve a evitare che si
+    # blocchi su una domanda debconf, non a chiudere la fuga di fd 0.
     print_info "Installazione Playwright e dipendenze..."
-    run_system sudo -u "$KIOSK_USER" npx playwright install-deps chromium 2>/dev/null || true
+    run_system sudo -u "$KIOSK_USER" DEBIAN_FRONTEND=noninteractive npx playwright install-deps chromium 2>/dev/null || true
     run_system sudo -u "$KIOSK_USER" npx playwright install chromium 2>/dev/null || true
     print_success "Playwright installato (usato per Zoom, Chromium di sistema per video)"
 

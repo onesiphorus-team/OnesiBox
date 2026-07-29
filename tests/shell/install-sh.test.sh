@@ -443,6 +443,12 @@ fi
 # install.sh viene caricato con `source` perché main(), da non root, si ferma
 # ai prerequisiti prima di qualsiasi domanda: passando da main() non si
 # arriverebbe mai a una ask().
+#
+# La risposta è una sentinella che non compare da nessun'altra parte: un valore
+# realistico come "Casa Nonna Maria" è anche il testo d'esempio del prompt di
+# install.sh, e un domani potrebbe far passare l'asserzione per la ragione
+# sbagliata.
+FD3_SENTINEL="ONESIBOX-FD3-OK"
 if ! command -v python3 > /dev/null 2>&1; then
     skip "pipe + terminale: init_input_source() apre il descrittore 3 su /dev/tty" "python3 non disponibile"
     skip "terminale: init_input_source() duplica lo stdin sul descrittore 3" "python3 non disponibile"
@@ -458,7 +464,7 @@ HARNESSEOF
     # Esegue \$1 dentro un pty, digita la risposta quando compare il prompt e
     # restituisce tutto ciò che il terminale ha visto.
     pty_ask() {
-        python3 - "$1" << 'PYEOF' 2>&1
+        python3 - "$1" "$FD3_SENTINEL" << 'PYEOF' 2>&1
 import os, pty, select, sys, time
 
 pid, fd = pty.fork()
@@ -484,7 +490,7 @@ while time.time() < deadline:
     if not typed and b"Nome [OnesiBox]" in out:
         typed = True
         time.sleep(0.2)
-        os.write(fd, b"Casa Nonna Maria\n")
+        os.write(fd, sys.argv[2].encode() + b"\n")
 
 sys.stdout.write(out.decode(errors="replace"))
 PYEOF
@@ -494,7 +500,7 @@ PYEOF
     # `curl … | sudo bash`, e le risposte devono arrivare dal terminale.
     PTY_PIPE_OUT=$(pty_ask "cat '$STUB_DIR/pty-harness.sh' | bash")
     if grep -q 'SORGENTE=\[/dev/tty' <<< "$PTY_PIPE_OUT" \
-        && grep -q 'NOME=\[Casa Nonna Maria\]' <<< "$PTY_PIPE_OUT"; then
+        && grep -q "NOME=\[$FD3_SENTINEL\]" <<< "$PTY_PIPE_OUT"; then
         pass "pipe + terminale: init_input_source() apre il descrittore 3 su /dev/tty"
     else
         fail "pipe + terminale: init_input_source() apre il descrittore 3 su /dev/tty" \
@@ -506,7 +512,7 @@ PYEOF
     # Ramo `exec 3<&0`: lo script è eseguito da file e stdin è già il terminale.
     PTY_FILE_OUT=$(pty_ask "bash '$STUB_DIR/pty-harness.sh'")
     if grep -q 'SORGENTE=\[terminale (stdin)' <<< "$PTY_FILE_OUT" \
-        && grep -q 'NOME=\[Casa Nonna Maria\]' <<< "$PTY_FILE_OUT"; then
+        && grep -q "NOME=\[$FD3_SENTINEL\]" <<< "$PTY_FILE_OUT"; then
         pass "terminale: init_input_source() duplica lo stdin sul descrittore 3"
     else
         fail "terminale: init_input_source() duplica lo stdin sul descrittore 3" \
