@@ -401,8 +401,21 @@ main() {
     # il dispositivo su OLD_COMMIT, altrimenti resta codice nuovo su disco con
     # il processo vecchio ancora vivo in RAM, e il guasto esplode al riavvio.
 
-    # Check if package.json changed (need npm install)
-    if git diff --name-only "${OLD_COMMIT}" "${NEW_COMMIT}" 2>/dev/null | grep -q "package.json"; then
+    # Check if dependency manifests changed (need npm install).
+    #
+    # Il pattern precedente, `grep -q "package.json"`, NON matcha
+    # "package-lock.json": "package" seguito da un carattere qualsiasi e da
+    # "json" non compare in quella stringa. Un rilascio che tocca solo il
+    # lockfile — come v0.12.0 — saltava quindi npm install.
+    #
+    # Se il diff non è calcolabile si esegue npm install comunque: sbagliare
+    # per eccesso costa qualche minuto, sbagliare per difetto lascia il
+    # dispositivo con node_modules disallineato dal codice.
+    CHANGED_FILES=$(git diff --name-only "${OLD_COMMIT}" "${NEW_COMMIT}" 2>/dev/null || true)
+    if [[ -z "${CHANGED_FILES}" ]]; then
+        log "WARN" "Cannot list changed files between ${OLD_COMMIT:0:7} and ${NEW_COMMIT:0:7}, running npm install anyway"
+    fi
+    if [[ -z "${CHANGED_FILES}" ]] || printf '%s\n' "${CHANGED_FILES}" | grep -Eq '(^|/)package(-lock)?\.json$'; then
         log "INFO" "Dependencies changed, running npm install..."
         if ! npm install --production --silent 2>/dev/null; then
             if ! npm install --production; then
