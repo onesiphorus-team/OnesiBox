@@ -29,6 +29,12 @@
 
 set -e
 
+# apt e dpkg, se possono, si fermano a chiedere: il prompt di un file conffile
+# modificato, la conferma "Yes, do as I say!" di una rimozione rischiosa. In
+# un'installazione automatica non c'è nessuno a rispondere, e la domanda
+# verrebbe letta da stdin — che con `curl … | sudo bash` è lo script stesso.
+export DEBIAN_FRONTEND=noninteractive
+
 # Colori per output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -79,6 +85,31 @@ PRESET_HEARTBEAT_INTERVAL="${ONESIBOX_HEARTBEAT_INTERVAL:-}"
 PRESET_DEFAULT_VOLUME="${ONESIBOX_DEFAULT_VOLUME:-}"
 PRESET_AUTO_UPDATES="${ONESIBOX_AUTO_UPDATES:-}"
 PRESET_KEEP_CONFIG="${ONESIBOX_KEEP_CONFIG:-}"
+
+# ============================================================================
+# Esecuzione dei comandi esterni
+# ============================================================================
+
+# Esegue un comando esterno con lo stdin chiuso.
+#
+# Con `curl … | sudo bash` lo stdin dello script È lo script stesso. Un figlio
+# che legge stdin — apt o dpkg su una domanda, npx che chiede "Ok to proceed?",
+# git che chiede una credenziale — si mangia le righe non ancora eseguite:
+# bash arriva a EOF e termina con codice 0, in silenzio, lasciando la box
+# mezza installata. È l'issue #68.
+#
+# Passare da qui, invece di ricordarsi un `< /dev/null` a ogni chiamata, è ciò
+# che il controllo statico in tests/shell/install-sh.test.sh verifica.
+#
+# Il descrittore 3 non viene toccato: la redirezione vale solo per fd 0 e solo
+# per il figlio, quindi ask()/ask_secret() continuano a leggere le risposte
+# dell'operatore da /dev/tty.
+#
+# Non va usato per i comandi che devono davvero leggere da una pipe
+# (`… | bash -`, `… | crontab -u root -`): quelli hanno già il loro stdin.
+run_system() {
+    "$@" < /dev/null
+}
 
 # ============================================================================
 # Funzioni di utilità
@@ -307,10 +338,10 @@ ask_secret() {
 
 # Genera UUID v4
 generate_uuid() {
-    cat /proc/sys/kernel/random/uuid 2>/dev/null || \
-    python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || \
+    run_system cat /proc/sys/kernel/random/uuid 2>/dev/null || \
+    run_system python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || \
     uuidgen 2>/dev/null || \
-    echo "$(head -c 16 /dev/urandom | xxd -p | sed 's/\(..\)/\1-/g;s/-$//' | cut -c1-36)"
+    echo "$(run_system head -c 16 /dev/urandom | xxd -p | sed 's/\(..\)/\1-/g;s/-$//' | cut -c1-36)"
 }
 
 # Valida URL
@@ -331,14 +362,14 @@ test_server_connection() {
     print_info "Verifico connessione a $url..."
 
     if command -v curl &> /dev/null; then
-        if curl -sSf --connect-timeout "$timeout" "$url" > /dev/null 2>&1; then
+        if run_system curl -sSf --connect-timeout "$timeout" "$url" > /dev/null 2>&1; then
             return 0
         fi
-        if curl -sSf --connect-timeout "$timeout" "$url/api/v1" > /dev/null 2>&1; then
+        if run_system curl -sSf --connect-timeout "$timeout" "$url/api/v1" > /dev/null 2>&1; then
             return 0
         fi
     elif command -v wget &> /dev/null; then
-        if wget -q --timeout="$timeout" --spider "$url" 2>/dev/null; then
+        if run_system wget -q --timeout="$timeout" --spider "$url" 2>/dev/null; then
             return 0
         fi
     else
@@ -453,7 +484,7 @@ detect_kiosk_user() {
     if [ -z "$KIOSK_USER" ]; then
         print_error "Nessun utente kiosk trovato!"
         print_info "Creazione utente 'onesibox'..."
-        useradd -m -s /bin/bash onesibox
+        run_system useradd -m -s /bin/bash onesibox
         KIOSK_USER="onesibox"
     fi
 
@@ -526,17 +557,17 @@ check_existing_installation() {
 
         if ! command -v jq &> /dev/null; then
             print_info "Installazione jq per leggere la configurazione..."
-            apt install -y -qq jq
+            run_system apt install -y -qq jq
         fi
 
         print_info "Trovato file di configurazione esistente: $CONFIG_FILE"
         echo ""
 
         if command -v jq &> /dev/null; then
-            EXISTING_NAME=$(jq -r '.device_name // "N/A"' "$CONFIG_FILE" 2>/dev/null)
-            EXISTING_SERVER=$(jq -r '.server_url // "N/A"' "$CONFIG_FILE" 2>/dev/null)
-            EXISTING_ID=$(jq -r '.appliance_id // "N/A"' "$CONFIG_FILE" 2>/dev/null)
-            EXISTING_TOKEN=$(jq -r '.appliance_token // ""' "$CONFIG_FILE" 2>/dev/null)
+            EXISTING_NAME=$(run_system jq -r '.device_name // "N/A"' "$CONFIG_FILE" 2>/dev/null)
+            EXISTING_SERVER=$(run_system jq -r '.server_url // "N/A"' "$CONFIG_FILE" 2>/dev/null)
+            EXISTING_ID=$(run_system jq -r '.appliance_id // "N/A"' "$CONFIG_FILE" 2>/dev/null)
+            EXISTING_TOKEN=$(run_system jq -r '.appliance_token // ""' "$CONFIG_FILE" 2>/dev/null)
 
             echo -e "  ${BOLD}Configurazione attuale:${NC}"
             echo -e "  • Nome:         ${CYAN}$EXISTING_NAME${NC}"
@@ -551,13 +582,13 @@ check_existing_installation() {
             print_success "Configurazione esistente mantenuta"
 
             if command -v jq &> /dev/null; then
-                DEVICE_NAME=$(jq -r '.device_name // "OnesiBox"' "$CONFIG_FILE")
-                SERVER_URL=$(jq -r '.server_url // ""' "$CONFIG_FILE")
-                APPLIANCE_ID=$(jq -r '.appliance_id // ""' "$CONFIG_FILE")
-                APPLIANCE_TOKEN=$(jq -r '.appliance_token // ""' "$CONFIG_FILE")
-                POLLING_INTERVAL=$(jq -r '.polling_interval_seconds // 5' "$CONFIG_FILE")
-                HEARTBEAT_INTERVAL=$(jq -r '.heartbeat_interval_seconds // 30' "$CONFIG_FILE")
-                DEFAULT_VOLUME=$(jq -r '.default_volume // 80' "$CONFIG_FILE")
+                DEVICE_NAME=$(run_system jq -r '.device_name // "OnesiBox"' "$CONFIG_FILE")
+                SERVER_URL=$(run_system jq -r '.server_url // ""' "$CONFIG_FILE")
+                APPLIANCE_ID=$(run_system jq -r '.appliance_id // ""' "$CONFIG_FILE")
+                APPLIANCE_TOKEN=$(run_system jq -r '.appliance_token // ""' "$CONFIG_FILE")
+                POLLING_INTERVAL=$(run_system jq -r '.polling_interval_seconds // 5' "$CONFIG_FILE")
+                HEARTBEAT_INTERVAL=$(run_system jq -r '.heartbeat_interval_seconds // 30' "$CONFIG_FILE")
+                DEFAULT_VOLUME=$(run_system jq -r '.default_volume // 80' "$CONFIG_FILE")
             else
                 print_warning "jq non installato, impossibile leggere configurazione"
                 KEEP_CONFIG=false
@@ -738,37 +769,39 @@ install_system_packages() {
     print_step "Installazione Pacchetti di Sistema"
 
     print_info "Aggiornamento sistema..."
-    apt update -qq
+    run_system apt update -qq
     print_success "Lista pacchetti aggiornata"
 
     # Node.js 20 LTS
     print_info "Installazione Node.js 20 LTS..."
-    NODE_VERSION=$(node -v 2>/dev/null | cut -d. -f1 | tr -d 'v')
+    NODE_VERSION=$(run_system node -v 2>/dev/null | cut -d. -f1 | tr -d 'v')
     NODE_VERSION=${NODE_VERSION:-0}
     if [ "$NODE_VERSION" -lt 20 ]; then
         print_info "Aggiornamento Node.js da v$NODE_VERSION a v20..."
-        apt remove -y -qq nodejs npm 2>/dev/null || true
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
-        apt install -y -qq nodejs
+        run_system apt remove -y -qq nodejs npm 2>/dev/null || true
+        # `bash -` legge lo script di NodeSource dalla pipe: è il suo stdin,
+        # non il nostro, e non va chiuso.
+        run_system curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
+        run_system apt install -y -qq nodejs
     fi
     if ! command -v npm &> /dev/null; then
-        apt install -y -qq npm 2>/dev/null || true
+        run_system apt install -y -qq npm 2>/dev/null || true
     fi
-    print_success "Node.js $(node --version) installato"
+    print_success "Node.js $(run_system node --version) installato"
 
     # Git
     print_info "Installazione Git..."
-    apt install -y -qq git
+    run_system apt install -y -qq git
     print_success "Git installato"
 
     # Chromium con codec video (H.264/MP4)
     print_info "Installazione Chromium con codec video..."
-    apt install -y -qq chromium chromium-codecs-ffmpeg-extra 2>/dev/null || \
-    apt install -y -qq chromium-browser chromium-codecs-ffmpeg-extra 2>/dev/null || \
-    apt install -y -qq chromium 2>/dev/null || \
-    apt install -y -qq chromium-browser 2>/dev/null || true
+    run_system apt install -y -qq chromium chromium-codecs-ffmpeg-extra 2>/dev/null || \
+    run_system apt install -y -qq chromium-browser chromium-codecs-ffmpeg-extra 2>/dev/null || \
+    run_system apt install -y -qq chromium 2>/dev/null || \
+    run_system apt install -y -qq chromium-browser 2>/dev/null || true
     # Verifica codec
-    if dpkg -l | grep -q "chromium-codecs-ffmpeg-extra"; then
+    if run_system dpkg -l | grep -q "chromium-codecs-ffmpeg-extra"; then
         print_success "Chromium installato con codec H.264"
     else
         print_warning "Codec extra non disponibili, video MP4 potrebbero non funzionare"
@@ -776,19 +809,19 @@ install_system_packages() {
 
     # labwc e dipendenze Wayland
     print_info "Installazione labwc e dipendenze Wayland..."
-    apt install -y -qq labwc seatd 2>/dev/null || true
+    run_system apt install -y -qq labwc seatd 2>/dev/null || true
     print_success "labwc installato"
 
     # Audio e codec multimediali
     print_info "Installazione strumenti audio e codec..."
-    apt install -y -qq alsa-utils pulseaudio
+    run_system apt install -y -qq alsa-utils pulseaudio
     # Codec video aggiuntivi per compatibilità
-    apt install -y -qq ffmpeg gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad 2>/dev/null || true
+    run_system apt install -y -qq ffmpeg gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad 2>/dev/null || true
     print_success "Strumenti audio e codec installati"
 
     # Utilities
     print_info "Installazione utilities..."
-    apt install -y -qq curl wget jq grim webp
+    run_system apt install -y -qq curl wget jq grim webp
     print_success "Utilities installate"
 }
 
@@ -801,10 +834,10 @@ setup_user_and_directories() {
 
     # Aggiungi utente ai gruppi necessari
     print_info "Configurazione gruppi per $KIOSK_USER..."
-    usermod -aG video,audio,input "$KIOSK_USER" 2>/dev/null || true
-    usermod -aG gpio,i2c,spi "$KIOSK_USER" 2>/dev/null || true
-    usermod -aG seat "$KIOSK_USER" 2>/dev/null || true
-    usermod -aG render "$KIOSK_USER" 2>/dev/null || true
+    run_system usermod -aG video,audio,input "$KIOSK_USER" 2>/dev/null || true
+    run_system usermod -aG gpio,i2c,spi "$KIOSK_USER" 2>/dev/null || true
+    run_system usermod -aG seat "$KIOSK_USER" 2>/dev/null || true
+    run_system usermod -aG render "$KIOSK_USER" 2>/dev/null || true
     print_success "Gruppi configurati"
 
     # Crea directory
@@ -855,25 +888,27 @@ install_application() {
         cp -r "$SCRIPT_DIR"/.[^.]* "$INSTALL_DIR/" 2>/dev/null || true
     elif [ -d "$INSTALL_DIR/.git" ]; then
         print_info "Aggiornamento repository esistente..."
-        git fetch origin
-        git reset --hard origin/main
+        run_system git fetch origin
+        run_system git reset --hard origin/main
     else
         print_info "Download da GitHub..."
         rm -rf "$INSTALL_DIR"/*
-        git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+        run_system git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
     fi
     print_success "Codice sorgente scaricato"
 
     # Installa dipendenze npm
     print_info "Installazione dipendenze npm..."
     cd "$INSTALL_DIR"
-    npm install --production --silent 2>/dev/null || npm install --production
+    run_system npm install --production --silent 2>/dev/null || run_system npm install --production
     print_success "Dipendenze npm installate"
 
     # Installa dipendenze e browser Playwright (necessario per Zoom web client)
+    # `playwright install-deps` invoca apt a sua volta: DEBIAN_FRONTEND è
+    # esportato, quindi la variabile arriva anche a quel apt.
     print_info "Installazione Playwright e dipendenze..."
-    sudo -u "$KIOSK_USER" npx playwright install-deps chromium 2>/dev/null || true
-    sudo -u "$KIOSK_USER" npx playwright install chromium 2>/dev/null || true
+    run_system sudo -u "$KIOSK_USER" npx playwright install-deps chromium 2>/dev/null || true
+    run_system sudo -u "$KIOSK_USER" npx playwright install chromium 2>/dev/null || true
     print_success "Playwright installato (usato per Zoom, Chromium di sistema per video)"
 
     # Imposta permessi
@@ -951,8 +986,8 @@ EOF
     print_success "Servizio systemd creato"
 
     print_info "Abilitazione servizio..."
-    systemctl daemon-reload
-    systemctl enable onesibox
+    run_system systemctl daemon-reload
+    run_system systemctl enable onesibox
     print_success "Servizio abilitato all'avvio"
 }
 
@@ -965,9 +1000,9 @@ setup_kiosk_autologin() {
 
     # 1. Disabilita LightDM se presente
     print_info "Disabilitazione display manager..."
-    systemctl disable lightdm 2>/dev/null || true
-    systemctl disable gdm 2>/dev/null || true
-    systemctl disable sddm 2>/dev/null || true
+    run_system systemctl disable lightdm 2>/dev/null || true
+    run_system systemctl disable gdm 2>/dev/null || true
+    run_system systemctl disable sddm 2>/dev/null || true
     print_success "Display manager disabilitato"
 
     # 2. Configura autologin su TTY1
@@ -986,7 +1021,7 @@ EOF
 
     # Rimuovi vecchia configurazione se presente
     if [ -f "$BASH_PROFILE" ]; then
-        sed -i '/# Auto-start labwc/,/^fi$/d' "$BASH_PROFILE" 2>/dev/null || true
+        run_system sed -i '/# Auto-start labwc/,/^fi$/d' "$BASH_PROFILE" 2>/dev/null || true
     fi
 
     # Aggiungi nuova configurazione
@@ -1054,11 +1089,14 @@ setup_auto_updates() {
         # Installa cron job (usa lo script wrapper con delay random)
         CRON_CMD="0 3 * * * /opt/onesibox/scripts/cron-update.sh"
 
-        # Rimuovi vecchio cron job se presente
-        crontab -u root -l 2>/dev/null | grep -v "onesibox.*update" | crontab -u root - 2>/dev/null || true
+        # Rimuovi vecchio cron job se presente.
+        # Il `crontab -u root -` finale legge la nuova tabella dalla pipe: il
+        # suo stdin è già quello giusto e non va chiuso. Solo il `crontab -l`
+        # in testa alla pipeline erediterebbe il descrittore 0 dello script.
+        run_system crontab -u root -l 2>/dev/null | grep -v "onesibox.*update" | crontab -u root - 2>/dev/null || true
 
         # Aggiungi nuovo cron job
-        (crontab -u root -l 2>/dev/null || true; echo "$CRON_CMD") | crontab -u root -
+        (run_system crontab -u root -l 2>/dev/null || true; echo "$CRON_CMD") | crontab -u root -
 
         print_success "Aggiornamenti automatici abilitati (ogni notte alle 3:00)"
     else
@@ -1067,7 +1105,7 @@ setup_auto_updates() {
     fi
 
     # Aggiungi permesso sudo per update senza password
-    if ! grep -q "update.sh" /etc/sudoers.d/onesibox 2>/dev/null; then
+    if ! run_system grep -q "update.sh" /etc/sudoers.d/onesibox 2>/dev/null; then
         echo "$KIOSK_USER ALL=(ALL) NOPASSWD: $INSTALL_DIR/update.sh" >> /etc/sudoers.d/onesibox
     fi
 }
