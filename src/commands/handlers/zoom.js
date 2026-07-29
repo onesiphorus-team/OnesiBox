@@ -79,6 +79,32 @@ function convertToWebClientUrl(url) {
 }
 
 /**
+ * Costruisce l'URL del web client a partire dal link ricevuto dall'esterno.
+ *
+ * Il link originale non viene toccato: quello che componiamo e' l'URL di
+ * app.zoom.us che apriamo noi, e vi aggiungiamo `uname` cosi' Zoom precompila
+ * il nome del partecipante.
+ *
+ * Serve perche' la box e' un kiosk senza tastiera davanti a una persona
+ * anziana: senza il nome nell'URL, Zoom mostra "Enter Meeting Info" con il
+ * campo vuoto e il pulsante Join disabilitato, e nessuno puo' compilarlo.
+ * Il riempimento via automazione in joinZoom() resta come riserva, ma dipende
+ * dal fatto che il form sia gia' comparso: Zoom mostra prima "Joining
+ * Meeting..." e il form arriva dopo, quindi non e' affidabile da solo.
+ */
+function buildJoinUrl(meetingUrl, participantName) {
+  const webClientUrl = convertToWebClientUrl(meetingUrl);
+
+  if (!participantName) {
+    return webClientUrl;
+  }
+
+  const separator = webClientUrl.includes('?') ? '&' : '?';
+
+  return `${webClientUrl}${separator}uname=${encodeURIComponent(participantName)}`;
+}
+
+/**
  * Parse Zoom URL to extract meeting details.
  *
  * @param {string} url - The URL to parse
@@ -308,7 +334,7 @@ async function joinZoom(command, browserController) {
 
   try {
     // Convert URL to web client format
-    const webClientUrl = convertToWebClientUrl(meeting_url);
+    const webClientUrl = buildJoinUrl(meeting_url, participant_name);
     logger.info('Converted to web client URL', { webClientUrl });
 
     // Close existing context if any
@@ -529,6 +555,7 @@ module.exports = {
   leaveZoom,
   parseZoomUrl,
   convertToWebClientUrl,
+  buildJoinUrl,
   cleanup,
   isZoomActive,
   checkMeetingEnded,
