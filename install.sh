@@ -6,9 +6,25 @@
 # su un Raspberry Pi con Raspberry Pi OS o Debian ARM64 con Wayland/labwc
 #
 # Utilizzo:
-#   curl -sSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
-#   oppure:
+#   # Installazione interattiva in un solo comando: le domande vengono lette dal
+#   # terminale (/dev/tty), perché stdin è occupato dallo script stesso.
+#   curl -fsSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh | sudo bash
+#
+#   # Oppure, da una copia locale del repository:
 #   sudo ./install.sh
+#
+#   # Senza domande (automazione, sessioni senza terminale):
+#   curl -fsSL https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh \
+#     | sudo bash -s -- --non-interactive --token IL_TUO_TOKEN
+#
+#   sudo ./install.sh --help  per l'elenco completo di opzioni e variabili.
+#
+# Codici di uscita:
+#   0  installazione completata (o annullata su richiesta esplicita)
+#   1  prerequisito non soddisfatto (root, rete, spazio disco, sistema)
+#   2  errore d'uso: opzione sconosciuta, dati obbligatori mancanti, nessun terminale
+#   3  input dell'operatore interrotto (EOF) prima di completare le risposte
+#   4  server Onesiforo non raggiungibile in modalità non interattiva
 # ============================================================================
 
 set -e
@@ -27,11 +43,42 @@ INSTALL_DIR="/opt/onesibox"
 LOG_DIR="/var/log/onesibox"
 CONFIG_FILE="$INSTALL_DIR/config/config.json"
 REPO_URL="https://github.com/onesiphorus-team/OnesiBox.git"
+RAW_INSTALL_URL="https://raw.githubusercontent.com/onesiphorus-team/OnesiBox/main/install.sh"
 DEFAULT_SERVER_URL="https://onesiforo.a80.it"
 
 # Utente che farà autologin (rilevato automaticamente)
 KIOSK_USER=""
 KIOSK_USER_UID=""
+
+# Directory della copia locale del repository da cui è stato lanciato lo script.
+# Va calcolata qui, prima di qualsiasi "cd": con `curl … | bash` lo script non
+# esiste su disco (BASH_SOURCE[0] è vuota) e resta volutamente vuota.
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+# ============================================================================
+# Modalità di esecuzione
+# ============================================================================
+
+# Modalità non interattiva: nessuna domanda, tutti i dati da opzioni/variabili
+NON_INTERACTIVE="${ONESIBOX_NON_INTERACTIVE:-false}"
+# Risponde "sì" alle conferme quando non c'è nessuno a rispondere
+ASSUME_YES="${ONESIBOX_ASSUME_YES:-false}"
+# Da dove vengono lette le risposte dell'operatore (descrizione per i log)
+INPUT_SOURCE=""
+
+# Valori pre-impostati da opzioni della riga di comando o variabili d'ambiente
+PRESET_DEVICE_NAME="${ONESIBOX_DEVICE_NAME:-}"
+PRESET_SERVER_URL="${ONESIBOX_SERVER_URL:-}"
+PRESET_APPLIANCE_ID="${ONESIBOX_APPLIANCE_ID:-}"
+PRESET_APPLIANCE_TOKEN="${ONESIBOX_APPLIANCE_TOKEN:-}"
+PRESET_POLLING_INTERVAL="${ONESIBOX_POLLING_INTERVAL:-}"
+PRESET_HEARTBEAT_INTERVAL="${ONESIBOX_HEARTBEAT_INTERVAL:-}"
+PRESET_DEFAULT_VOLUME="${ONESIBOX_DEFAULT_VOLUME:-}"
+PRESET_AUTO_UPDATES="${ONESIBOX_AUTO_UPDATES:-}"
+PRESET_KEEP_CONFIG="${ONESIBOX_KEEP_CONFIG:-}"
 
 # ============================================================================
 # Funzioni di utilità
@@ -74,6 +121,185 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}✗ ${NC}$1"
+}
+
+# ============================================================================
+# Opzioni della riga di comando
+# ============================================================================
+
+# Interpreta i valori booleani accettati da opzioni e variabili d'ambiente
+is_true() {
+    case "$1" in
+        1|[tT][rR][uU][eE]|[yY]|[yY][eE][sS]|[sS]|[sS][iI]|[oO][nN]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_false() {
+    case "$1" in
+        0|[fF][aA][lL][sS][eE]|[nN]|[nN][oO]|[oO][fF][fF]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+usage() {
+    cat << EOF
+OnesiBox - Script di installazione
+
+Uso:
+  sudo ./install.sh [opzioni]
+  curl -fsSL <url>/install.sh | sudo bash
+  curl -fsSL <url>/install.sh | sudo bash -s -- [opzioni]
+
+Opzioni:
+  --non-interactive       Non porre domande: i dati arrivano da opzioni/variabili
+  -y, --yes               Rispondi "sì" alle conferme (serve in --non-interactive
+                          per proseguire su sistemi non supportati o server non
+                          raggiungibili)
+  --name NOME             Nome del dispositivo (default: OnesiBox)
+  --server URL            URL del server Onesiforo (default: $DEFAULT_SERVER_URL)
+  --appliance-id UUID     UUID dell'appliance (default: generato automaticamente)
+  --token TOKEN           Token di autenticazione (obbligatorio con --non-interactive
+                          se non esiste già una configurazione da riusare)
+  --polling-interval SEC  Intervallo di polling in secondi (default: 5)
+  --heartbeat-interval SEC Intervallo di heartbeat in secondi (default: 30)
+  --volume 0-100          Volume predefinito (default: 80)
+  --auto-updates si|no    Aggiornamenti automatici notturni (default: si)
+  --keep-config si|no     Riusa la configurazione esistente, se presente
+  -h, --help              Mostra questo messaggio ed esce
+
+Variabili d'ambiente equivalenti:
+  ONESIBOX_NON_INTERACTIVE   ONESIBOX_ASSUME_YES        ONESIBOX_DEVICE_NAME
+  ONESIBOX_SERVER_URL        ONESIBOX_APPLIANCE_ID      ONESIBOX_APPLIANCE_TOKEN
+  ONESIBOX_POLLING_INTERVAL  ONESIBOX_HEARTBEAT_INTERVAL ONESIBOX_DEFAULT_VOLUME
+  ONESIBOX_AUTO_UPDATES      ONESIBOX_KEEP_CONFIG
+EOF
+}
+
+# Un'opzione che richiede un valore ma non lo riceve è un errore d'uso
+require_option_value() {
+    local option="$1"
+    local value="$2"
+
+    if [ -z "$value" ]; then
+        print_error "L'opzione $option richiede un valore" >&2
+        exit 2
+    fi
+}
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --non-interactive) NON_INTERACTIVE=true ;;
+            -y|--yes) ASSUME_YES=true ;;
+            --name) require_option_value "$1" "${2:-}"; PRESET_DEVICE_NAME="$2"; shift ;;
+            --server) require_option_value "$1" "${2:-}"; PRESET_SERVER_URL="$2"; shift ;;
+            --appliance-id) require_option_value "$1" "${2:-}"; PRESET_APPLIANCE_ID="$2"; shift ;;
+            --token) require_option_value "$1" "${2:-}"; PRESET_APPLIANCE_TOKEN="$2"; shift ;;
+            --polling-interval) require_option_value "$1" "${2:-}"; PRESET_POLLING_INTERVAL="$2"; shift ;;
+            --heartbeat-interval) require_option_value "$1" "${2:-}"; PRESET_HEARTBEAT_INTERVAL="$2"; shift ;;
+            --volume) require_option_value "$1" "${2:-}"; PRESET_DEFAULT_VOLUME="$2"; shift ;;
+            --auto-updates) require_option_value "$1" "${2:-}"; PRESET_AUTO_UPDATES="$2"; shift ;;
+            --keep-config) require_option_value "$1" "${2:-}"; PRESET_KEEP_CONFIG="$2"; shift ;;
+            -h|--help) usage; exit 0 ;;
+            *)
+                print_error "Opzione sconosciuta: $1" >&2
+                echo "" >&2
+                usage >&2
+                exit 2
+                ;;
+        esac
+        shift
+    done
+}
+
+# ============================================================================
+# Input dell'operatore
+# ============================================================================
+
+# Decide da dove leggere le risposte e prepara il descrittore 3.
+#
+# Con `curl … | sudo bash` lo stdin dello script È lo script stesso: una `read`
+# su stdin consumerebbe il sorgente invece dell'input dell'operatore, tornando
+# subito EOF senza nemmeno mostrare il prompt. In quel caso si apre il terminale
+# di controllo (/dev/tty) su un descrittore dedicato, lasciando stdin dov'è.
+#
+# ATTENZIONE: non riassegnare mai il descrittore 0 (né qui né altrove). Quando
+# bash legge lo script da stdin, un `exec 0< /dev/null` gli fa perdere le righe
+# non ancora lette: lo script terminerebbe a metà, in silenzio e con codice 0.
+#
+# Ritorna 1 se servono risposte ma non esiste alcun terminale da cui leggerle.
+init_input_source() {
+    if is_true "$NON_INTERACTIVE"; then
+        INPUT_SOURCE="nessuno (modalità non interattiva)"
+        return 0
+    fi
+
+    if [ -t 0 ]; then
+        exec 3<&0
+        INPUT_SOURCE="terminale (stdin)"
+        return 0
+    fi
+
+    # `: < /dev/tty` fallisce senza terminare lo script se non c'è un terminale
+    # di controllo; `exec` in quel caso farebbe uscire la shell.
+    if { : < /dev/tty; } 2>/dev/null; then
+        exec 3< /dev/tty
+        INPUT_SOURCE="/dev/tty (stdin occupato dalla pipe)"
+        return 0
+    fi
+
+    INPUT_SOURCE=""
+    return 1
+}
+
+# Legge una risposta dell'operatore in una variabile.
+# Il prompt è stampato esplicitamente perché `read -p` lo mostra solo quando
+# stdin è un terminale, e con `curl … | bash` non lo è.
+ask() {
+    local __ask_var="$1"
+    local __ask_prompt="$2"
+    local __ask_reply=""
+
+    if is_true "$NON_INTERACTIVE"; then
+        print_error "Domanda inattesa in modalità non interattiva: $__ask_prompt" >&2
+        exit 2
+    fi
+
+    printf '%s' "$__ask_prompt" >&2
+
+    if ! IFS= read -r __ask_reply <&3; then
+        printf '\n' >&2
+        print_error "Input dell'operatore interrotto: installazione NON eseguita"
+        print_info "Per installare senza domande: ./install.sh --non-interactive --help"
+        exit 3
+    fi
+
+    printf -v "$__ask_var" '%s' "$__ask_reply"
+}
+
+# Come ask(), ma senza eco a schermo (per i segreti)
+ask_secret() {
+    local __ask_var="$1"
+    local __ask_prompt="$2"
+    local __ask_reply=""
+
+    if is_true "$NON_INTERACTIVE"; then
+        print_error "Domanda inattesa in modalità non interattiva: $__ask_prompt" >&2
+        exit 2
+    fi
+
+    printf '%s' "$__ask_prompt" >&2
+
+    if ! IFS= read -r -s __ask_reply <&3; then
+        printf '\n' >&2
+        print_error "Input dell'operatore interrotto: installazione NON eseguita"
+        print_info "Per installare senza domande: ./install.sh --non-interactive --help"
+        exit 3
+    fi
+    printf '\n' >&2
+
+    printf -v "$__ask_var" '%s' "$__ask_reply"
 }
 
 # Genera UUID v4
@@ -120,7 +346,8 @@ test_server_connection() {
     return 1
 }
 
-# Chiedi conferma
+# Chiedi conferma. In modalità non interattiva risponde da sé: "sì" se è stato
+# passato --yes, altrimenti il valore predefinito della domanda.
 confirm() {
     local prompt="$1"
     local default="${2:-n}"
@@ -132,13 +359,73 @@ confirm() {
         prompt="$prompt [s/N]: "
     fi
 
-    read -r -p "$prompt" response
-    response=${response:-$default}
+    if is_true "$NON_INTERACTIVE"; then
+        if is_true "$ASSUME_YES"; then
+            response="s"
+        else
+            response="$default"
+        fi
+        print_info "${prompt}${response} (modalità non interattiva)"
+    else
+        ask response "$prompt"
+        response=${response:-$default}
+    fi
 
     case "$response" in
         [sS][iI]|[sS]|[yY][eE][sS]|[yY]) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# Conferma con risposta eventualmente già decisa da un'opzione/variabile
+confirm_preset() {
+    local preset="$1"
+    local prompt="$2"
+    local default="${3:-n}"
+
+    if [ -n "$preset" ]; then
+        if is_true "$preset"; then
+            print_info "$prompt → sì (pre-impostato)"
+            return 0
+        fi
+        print_info "$prompt → no (pre-impostato)"
+        return 1
+    fi
+
+    confirm "$prompt" "$default"
+}
+
+# Verifica, prima di toccare il sistema, che la modalità non interattiva abbia
+# tutti i dati obbligatori: meglio fermarsi subito che a metà installazione.
+validate_preset_inputs() {
+    local value
+
+    for value in "$PRESET_POLLING_INTERVAL" "$PRESET_HEARTBEAT_INTERVAL" "$PRESET_DEFAULT_VOLUME"; do
+        if [ -n "$value" ] && ! [[ "$value" =~ ^[0-9]+$ ]]; then
+            print_error "Valore numerico non valido: '$value'" >&2
+            exit 2
+        fi
+    done
+
+    if [ -n "$PRESET_SERVER_URL" ] && ! validate_url "$PRESET_SERVER_URL"; then
+        print_error "URL server non valido: '$PRESET_SERVER_URL' (deve iniziare con http:// o https://)" >&2
+        exit 2
+    fi
+
+    is_true "$NON_INTERACTIVE" || return 0
+
+    # Il token non serve solo se c'è già una configurazione da riusare
+    local can_reuse_config=false
+    if [ -f "$CONFIG_FILE" ] && ! is_false "$PRESET_KEEP_CONFIG"; then
+        can_reuse_config=true
+    fi
+
+    if [ -z "$PRESET_APPLIANCE_TOKEN" ] && [ "$can_reuse_config" = false ]; then
+        print_error "Modalità non interattiva: manca il token di autenticazione." >&2
+        print_info "Passa --token IL_TUO_TOKEN oppure imposta ONESIBOX_APPLIANCE_TOKEN." >&2
+        print_info "Il token si ottiene dal pannello Onesiforo, sezione 'Nuova Appliance'." >&2
+        exit 2
+    fi
 }
 
 # ============================================================================
@@ -256,7 +543,7 @@ check_existing_installation() {
             echo ""
         fi
 
-        if confirm "Vuoi mantenere la configurazione esistente?" "y"; then
+        if confirm_preset "$PRESET_KEEP_CONFIG" "Vuoi mantenere la configurazione esistente?" "y"; then
             KEEP_CONFIG=true
             print_success "Configurazione esistente mantenuta"
 
@@ -291,12 +578,35 @@ collect_configuration() {
 
     print_step "Configurazione OnesiBox"
 
+    if is_true "$NON_INTERACTIVE"; then
+        collect_configuration_from_presets
+    else
+        collect_configuration_interactive
+    fi
+
+    # Riepilogo
+    print_step "Riepilogo Configurazione"
+    echo -e "  ${BOLD}Nome dispositivo:${NC}     $DEVICE_NAME"
+    echo -e "  ${BOLD}URL Server:${NC}           $SERVER_URL"
+    echo -e "  ${BOLD}Appliance ID:${NC}         $APPLIANCE_ID"
+    echo -e "  ${BOLD}Token:${NC}                ****${APPLIANCE_TOKEN: -4}"
+    echo -e "  ${BOLD}Utente kiosk:${NC}         $KIOSK_USER"
+    echo ""
+
+    if ! confirm "Procedere con l'installazione?" "y"; then
+        echo -e "\n${YELLOW}Installazione annullata.${NC}\n"
+        exit 0
+    fi
+}
+
+# Configurazione raccolta dall'operatore, una domanda alla volta
+collect_configuration_interactive() {
     echo -e "${CYAN}Per completare l'installazione, sono necessarie alcune informazioni.${NC}"
     echo -e "${CYAN}Le puoi ottenere dal pannello Onesiforo Web nella sezione 'Nuova Appliance'.${NC}\n"
 
     # Nome dispositivo
     echo -e "${BOLD}1. Nome del dispositivo${NC} (es: 'Casa Nonna Maria')"
-    read -r -p "   Nome [OnesiBox]: " DEVICE_NAME
+    ask DEVICE_NAME "   Nome [OnesiBox]: "
     DEVICE_NAME=${DEVICE_NAME:-"OnesiBox"}
     print_success "Nome: $DEVICE_NAME"
     echo ""
@@ -305,7 +615,7 @@ collect_configuration() {
     echo -e "${BOLD}2. URL del Server Onesiforo${NC}"
     echo -e "   ${YELLOW}Premi Invio per usare: $DEFAULT_SERVER_URL${NC}"
     while true; do
-        read -r -p "   URL [$DEFAULT_SERVER_URL]: " SERVER_URL
+        ask SERVER_URL "   URL [$DEFAULT_SERVER_URL]: "
         SERVER_URL=${SERVER_URL:-$DEFAULT_SERVER_URL}
         SERVER_URL="${SERVER_URL%/}"
 
@@ -334,7 +644,7 @@ collect_configuration() {
     # Appliance ID
     echo -e "${BOLD}3. ID Appliance (UUID)${NC}"
     echo -e "   ${YELLOW}Lascia vuoto per generarne uno automaticamente.${NC}"
-    read -r -p "   UUID [genera automatico]: " APPLIANCE_ID
+    ask APPLIANCE_ID "   UUID [genera automatico]: "
 
     if [ -z "$APPLIANCE_ID" ]; then
         APPLIANCE_ID=$(generate_uuid)
@@ -348,8 +658,7 @@ collect_configuration() {
     # Token Appliance
     echo -e "${BOLD}4. Token di Autenticazione${NC}"
     while true; do
-        read -r -s -p "   Token (nascosto): " APPLIANCE_TOKEN
-        echo ""
+        ask_secret APPLIANCE_TOKEN "   Token (nascosto): "
 
         if [ -z "$APPLIANCE_TOKEN" ]; then
             print_error "Il token è obbligatorio"
@@ -363,27 +672,59 @@ collect_configuration() {
 
     # Impostazioni opzionali
     echo -e "${BOLD}5. Impostazioni Opzionali${NC}"
-    read -r -p "   Intervallo polling in secondi [5]: " POLLING_INTERVAL
+    ask POLLING_INTERVAL "   Intervallo polling in secondi [5]: "
     POLLING_INTERVAL=${POLLING_INTERVAL:-5}
-    read -r -p "   Intervallo heartbeat in secondi [30]: " HEARTBEAT_INTERVAL
+    ask HEARTBEAT_INTERVAL "   Intervallo heartbeat in secondi [30]: "
     HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30}
-    read -r -p "   Volume predefinito 0-100 [80]: " DEFAULT_VOLUME
+    ask DEFAULT_VOLUME "   Volume predefinito 0-100 [80]: "
     DEFAULT_VOLUME=${DEFAULT_VOLUME:-80}
     echo ""
+}
 
-    # Riepilogo
-    print_step "Riepilogo Configurazione"
-    echo -e "  ${BOLD}Nome dispositivo:${NC}     $DEVICE_NAME"
-    echo -e "  ${BOLD}URL Server:${NC}           $SERVER_URL"
-    echo -e "  ${BOLD}Appliance ID:${NC}         $APPLIANCE_ID"
-    echo -e "  ${BOLD}Token:${NC}                ****${APPLIANCE_TOKEN: -4}"
-    echo -e "  ${BOLD}Utente kiosk:${NC}         $KIOSK_USER"
-    echo ""
+# Configurazione presa da opzioni e variabili d'ambiente, senza domande.
+# Ogni dato mancante o non valido ferma l'installazione con un errore parlante:
+# non si prosegue mai "a metà".
+collect_configuration_from_presets() {
+    print_info "Modalità non interattiva: configurazione da opzioni e variabili d'ambiente"
 
-    if ! confirm "Procedere con l'installazione?" "y"; then
-        echo -e "\n${YELLOW}Installazione annullata.${NC}\n"
-        exit 0
+    DEVICE_NAME="${PRESET_DEVICE_NAME:-OnesiBox}"
+    SERVER_URL="${PRESET_SERVER_URL:-$DEFAULT_SERVER_URL}"
+    SERVER_URL="${SERVER_URL%/}"
+    APPLIANCE_ID="$PRESET_APPLIANCE_ID"
+    APPLIANCE_TOKEN="$PRESET_APPLIANCE_TOKEN"
+    POLLING_INTERVAL="${PRESET_POLLING_INTERVAL:-5}"
+    HEARTBEAT_INTERVAL="${PRESET_HEARTBEAT_INTERVAL:-30}"
+    DEFAULT_VOLUME="${PRESET_DEFAULT_VOLUME:-80}"
+
+    if ! validate_url "$SERVER_URL"; then
+        print_error "URL server non valido: '$SERVER_URL'"
+        exit 2
     fi
+
+    if [ -z "$APPLIANCE_TOKEN" ]; then
+        print_error "Token di autenticazione mancante (--token / ONESIBOX_APPLIANCE_TOKEN)"
+        exit 2
+    fi
+
+    if [ -z "$APPLIANCE_ID" ]; then
+        APPLIANCE_ID=$(generate_uuid)
+        print_warning "UUID generato automaticamente: $APPLIANCE_ID"
+        print_warning "Registralo nel pannello Onesiforo, altrimenti la box resterà scollegata."
+    fi
+
+    if ! test_server_connection "$SERVER_URL"; then
+        print_warning "Server non raggiungibile: $SERVER_URL"
+        if ! is_true "$ASSUME_YES"; then
+            print_error "Installazione interrotta. Usa --yes per procedere comunque."
+            exit 4
+        fi
+        print_warning "Proseguo su richiesta esplicita (--yes)"
+    fi
+
+    print_success "Nome: $DEVICE_NAME"
+    print_success "Server: $SERVER_URL"
+    print_success "Appliance ID: $APPLIANCE_ID"
+    print_success "Token configurato"
 }
 
 # ============================================================================
@@ -503,9 +844,9 @@ install_application() {
 
     cd "$INSTALL_DIR"
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    if [ -f "$SCRIPT_DIR/package.json" ]; then
+    # SCRIPT_DIR è vuota quando lo script arriva da una pipe (curl … | bash):
+    # in quel caso non c'è alcuna copia locale da cui copiare, si scarica.
+    if [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ] && [ -f "$SCRIPT_DIR/package.json" ]; then
         print_info "Installazione da directory locale..."
         cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/" 2>/dev/null || true
         cp -r "$SCRIPT_DIR"/.[^.]* "$INSTALL_DIR/" 2>/dev/null || true
@@ -706,7 +1047,7 @@ setup_auto_updates() {
 
     # Chiedi se abilitare gli aggiornamenti automatici
     echo -e "${CYAN}Gli aggiornamenti automatici verificano e installano nuove versioni ogni notte.${NC}"
-    if confirm "Vuoi abilitare gli aggiornamenti automatici?" "y"; then
+    if confirm_preset "$PRESET_AUTO_UPDATES" "Vuoi abilitare gli aggiornamenti automatici?" "y"; then
         # Installa cron job (usa lo script wrapper con delay random)
         CRON_CMD="0 3 * * * /opt/onesibox/scripts/cron-update.sh"
 
@@ -779,8 +1120,37 @@ print_summary() {
 # ============================================================================
 
 main() {
-    clear
+    parse_args "$@"
+
+    # `clear` fallisce se TERM non è impostato (sessioni non interattive):
+    # non è un motivo per interrompere l'installazione.
+    clear 2>/dev/null || true
     print_banner
+
+    # Prima di toccare il sistema: i dati passati sono coerenti?
+    validate_preset_inputs
+
+    # Prima di toccare il sistema: c'è qualcuno che può rispondere alle domande?
+    if ! init_input_source; then
+        print_error "Nessun terminale disponibile per le domande dell'installatore."
+        echo ""
+        print_info "Lo script è stato avviato senza un terminale (stdin non è un tty"
+        print_info "e /dev/tty non è accessibile), quindi non può chiedere nulla."
+        echo ""
+        print_info "Soluzioni:"
+        print_info "  1. Esegui l'installazione da una sessione SSH o da un terminale;"
+        print_info "  2. oppure usa la modalità non interattiva, per esempio:"
+        echo ""
+        echo -e "     ${YELLOW}curl -fsSL $RAW_INSTALL_URL \\"
+        echo -e "       | sudo bash -s -- --non-interactive --token IL_TUO_TOKEN${NC}"
+        echo ""
+        print_error "Installazione NON eseguita."
+        exit 2
+    fi
+
+    if ! is_true "$NON_INTERACTIVE"; then
+        print_info "Le risposte verranno lette da: $INPUT_SOURCE"
+    fi
 
     check_prerequisites
     detect_kiosk_user
@@ -797,6 +1167,13 @@ main() {
     print_summary
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+# Esegue main() sia quando lo script è invocato da file (./install.sh, bash
+# install.sh) sia quando bash lo legge da stdin (curl … | sudo bash): in questo
+# secondo caso BASH_SOURCE[0] è VUOTA e $0 vale "bash", quindi il confronto
+# BASH_SOURCE[0] == $0 da solo era falso e non veniva eseguito nulla, in
+# silenzio e con codice di uscita 0.
+# Restano esclusi solo i `source install.sh`, dove BASH_SOURCE[0] è il percorso
+# del file ma $0 è la shell chiamante.
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
