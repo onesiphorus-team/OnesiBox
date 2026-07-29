@@ -373,8 +373,9 @@ journalctl -u onesibox -f
 | `npm start` | Avvia in produzione |
 | `npm run dev` | Avvia in sviluppo (con console log) |
 | `npm run dev:mac` | Avvia in dev mode su macOS contro `https://onesiforo.test` (Herd). Vedi [`docs/dev-macos.md`](docs/dev-macos.md) |
-| `npm test` | Esegue tutti i test |
+| `npm test` | Esegue tutti i test, inclusi quelli shell su `install.sh` |
 | `npm run test:watch` | Test in watch mode |
+| `npm run test:shell` | Solo i test shell su `install.sh` (già compresi in `npm test`) |
 | `npm run lint` | Verifica codice con ESLint |
 
 ## Contribuire
