@@ -37,6 +37,25 @@ describe('unwrapPayload', () => {
     const payload = { data: 'ok', screenshot_enabled: true };
     expect(unwrapPayload(payload)).toEqual(payload);
   });
+
+  // Collection endpoints wrap a list the same way: /appliances/commands returns
+  // { data: [...], meta: {...} }. Returning the envelope there would silently
+  // hand a caller the wrapper instead of the commands.
+  it('unwraps a Laravel Resource collection to the array itself', () => {
+    const commands = [{ uuid: 'a', type: 'reboot' }, { uuid: 'b', type: 'set_volume' }];
+    const body = { data: commands, meta: { total: 2, pending: 2 } };
+
+    expect(unwrapPayload(body)).toBe(commands);
+  });
+
+  it('unwraps an empty Laravel Resource collection to an empty array', () => {
+    expect(unwrapPayload({ data: [], meta: { total: 0 } })).toEqual([]);
+  });
+
+  it('returns null for a bare top-level array, which is not a Resource envelope', () => {
+    expect(unwrapPayload([{ uuid: 'a' }])).toBeNull();
+    expect(unwrapPayload([])).toBeNull();
+  });
 });
 
 // The heartbeat propagation tests that used to live here reimplemented the
