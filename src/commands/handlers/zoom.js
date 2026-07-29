@@ -36,6 +36,45 @@ const MEETING_ENDED_PHRASES = [
 let browserContext = null;
 let page = null;
 
+// Identificativo della sessione che possiede browserContext/page.
+//
+// Serve perché un handler può sopravvivere al comando che lo ha avviato:
+// _runHandlerWithTimeout() in commands/manager.js abbandona un join_zoom che
+// sfora i 180s e lo lascia girare, poi rilascia `processing` e il comando
+// successivo parte. Da quel momento due joinZoom() insistono sullo stesso
+// stato di modulo, e il più vecchio — che è quello destinato a fallire —
+// arriverebbe al proprio cleanup chiudendo il browser della riunione appena
+// avviata. Confrontare il proprio id con currentSessionId è ciò che permette
+// a una sessione superata di accorgersene e non toccare più nulla. Issue #77.
+let sessionCounter = 0;
+let currentSessionId = 0;
+
+// Serializza la fase di avvio (chiusura della sessione precedente + launch).
+// Due launchPersistentContext() insieme si contendono il SingletonLock di
+// USER_DATA_DIR: il secondo Chromium rifiuta di partire, o peggio i due si
+// corrompono il profilo a vicenda. Chi arriva dopo aspetta il proprio turno.
+let startupChain = Promise.resolve();
+
+/**
+ * Raised when a newer join_zoom took ownership while this one was still
+ * running. Distinta da un fallimento vero: non c'è nulla da ripulire e nulla
+ * da segnalare come guasto, questa sessione ha semplicemente perso la corsa.
+ */
+class SupersededSessionError extends Error {
+  constructor(sessionId) {
+    super(`join_zoom session ${sessionId} superseded by a newer command`);
+    this.name = 'SupersededSessionError';
+    this.sessionId = sessionId;
+  }
+}
+
+/** Esegue `task` dopo che l'avvio precedente si è concluso, comunque sia andato. */
+function runStartupExclusively(task) {
+  const result = startupChain.then(task, task);
+  startupChain = result.then(() => {}, () => {});
+  return result;
+}
+
 // End-of-meeting detection timers (module-level so they can be cleared from any handler).
 let endDetectionStartTimer = null;
 let endDetectionPollInterval = null;
@@ -317,6 +356,15 @@ async function joinZoom(command, browserController) {
 
   logger.info('Starting Zoom join process', { meeting_url, participant_name });
 
+  // Da qui in poi questa è la sessione che comanda: un eventuale join_zoom
+  // ancora in volo è superato e smetterà di toccare lo stato condiviso.
+  const sessionId = ++sessionCounter;
+  currentSessionId = sessionId;
+
+  // Riferimento locale alla pagina: `page` è di modulo e può passare a una
+  // sessione più recente mentre questa è ancora dentro un await.
+  let activePage = null;
+
   const currentState = stateManager.getState();
 
   // Interrupt any current playback
@@ -337,31 +385,55 @@ async function joinZoom(command, browserController) {
     const webClientUrl = buildJoinUrl(meeting_url, participant_name);
     logger.info('Converted to web client URL', { webClientUrl });
 
-    // Close existing context if any
-    await closeBrowserContext();
+    // Avvio serializzato: finché non è concluso, nessun altro join_zoom apre
+    // un secondo Chromium sullo stesso profilo.
+    activePage = await runStartupExclusively(async () => {
+      if (sessionId !== currentSessionId) {
+        throw new SupersededSessionError(sessionId);
+      }
 
-    // Launch browser with persistent context for camera/mic permissions
-    browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, {
-      headless: false,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--start-fullscreen',
-        '--autoplay-policy=no-user-gesture-required',
-        '--password-store=basic',
-      ],
-      permissions: ['microphone', 'camera'],
-      viewport: null, // Fullscreen
-      ignoreHTTPSErrors: true,
+      // Close existing context if any. È anche ciò che rilascia il
+      // SingletonLock del profilo prima del prossimo launch.
+      await closeBrowserContext();
+
+      // Launch browser with persistent context for camera/mic permissions
+      const launched = await chromium.launchPersistentContext(USER_DATA_DIR, {
+        headless: false,
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--start-fullscreen',
+          '--autoplay-policy=no-user-gesture-required',
+          '--password-store=basic',
+        ],
+        permissions: ['microphone', 'camera'],
+        viewport: null, // Fullscreen
+        ignoreHTTPSErrors: true,
+      });
+
+      // Superata mentre Chromium si avviava: questo contesto non verrà mai
+      // pubblicato, quindi nessuno potrebbe più chiuderlo. Va chiuso ora,
+      // altrimenti resta acceso fino al riavvio del servizio tenendosi il
+      // profilo — ed è il "lock stantio" che fa fallire ogni join successivo.
+      if (sessionId !== currentSessionId) {
+        try {
+          await launched.close();
+        } catch (error) {
+          logger.warn('Error closing superseded browser context', { error: error.message });
+        }
+        throw new SupersededSessionError(sessionId);
+      }
+
+      browserContext = launched;
+      page = launched.pages()[0] || await launched.newPage();
+      return page;
     });
-
-    page = browserContext.pages()[0] || await browserContext.newPage();
 
     // Navigate to Zoom web client
     logger.info('Navigating to Zoom web client');
-    await page.goto(webClientUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await activePage.goto(webClientUrl, { waitUntil: 'networkidle', timeout: 30000 });
 
     // Wait for the join form to appear (try multiple selectors)
     logger.info('Waiting for join form');
@@ -372,7 +444,7 @@ async function joinZoom(command, browserController) {
 
     for (const selector of nameSelectors) {
       try {
-        nameInput = await page.waitForSelector(selector, { timeout: 5000 });
+        nameInput = await activePage.waitForSelector(selector, { timeout: 5000 });
         if (nameInput) {
           logger.info('Found name input', { selector });
           break;
@@ -397,7 +469,7 @@ async function joinZoom(command, browserController) {
 
     for (const text of joinButtonTexts) {
       try {
-        const button = await page.$(`button:has-text("${text}")`);
+        const button = await activePage.$(`button:has-text("${text}")`);
         if (button) {
           await button.click();
           joinClicked = true;
@@ -412,12 +484,19 @@ async function joinZoom(command, browserController) {
     if (!joinClicked) {
       // Try clicking any visible primary button
       try {
-        await page.click('button[type="submit"], button.zm-btn--primary, button.preview-join-button', { timeout: 5000 });
+        await activePage.click('button[type="submit"], button.zm-btn--primary, button.preview-join-button', { timeout: 5000 });
         joinClicked = true;
         logger.info('Clicked join button via fallback selector');
       } catch {
         logger.warn('Could not find join button to click');
       }
+    }
+
+    // Le attese qui sopra arrivano a una sessantina di secondi: se nel
+    // frattempo è entrato un altro join_zoom, lo stato e il rilevamento di
+    // fine riunione sono roba sua, e descrivono un'altra riunione.
+    if (sessionId !== currentSessionId) {
+      throw new SupersededSessionError(sessionId);
     }
 
     // Parse meeting ID for state tracking
@@ -438,13 +517,36 @@ async function joinZoom(command, browserController) {
     });
 
   } catch (error) {
+    if (error instanceof SupersededSessionError) {
+      // Non è un guasto: il comando che aveva avviato questa sessione è già
+      // stato chiuso dal manager, e il suo posto è stato preso.
+      logger.warn('Abandoned Zoom join: a newer command took over', {
+        sessionId,
+        currentSessionId
+      });
+      throw error;
+    }
+
     logger.error('Failed to join Zoom meeting', { error: error.message });
 
+    // Il cleanup vale solo per la propria sessione. Un handler abbandonato dal
+    // timeout del manager arriva qui quando browserContext/page appartengono
+    // ormai al comando successivo: chiuderli spegnerebbe la riunione in corso
+    // lasciando lo stato su CALLING e nessun errore da nessuna parte.
+    if (sessionId !== currentSessionId) {
+      logger.warn('Skipping Zoom cleanup: a newer session owns the browser', {
+        sessionId,
+        currentSessionId,
+        error: error.message
+      });
+      throw error;
+    }
+
     // Take screenshot for debugging
-    if (page) {
+    if (activePage) {
       try {
         const screenshotPath = path.join(os.tmpdir(), 'zoom-error-screenshot.png');
-        await page.screenshot({ path: screenshotPath });
+        await activePage.screenshot({ path: screenshotPath });
         logger.info('Debug screenshot saved', { path: screenshotPath });
       } catch {
         // Ignore screenshot errors
