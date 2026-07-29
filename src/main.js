@@ -11,7 +11,7 @@ const { loadConfig } = require('./config/config');
 const { stateManager, CONNECTION_STATUS, WS_CONNECTION_STATUS } = require('./state/state-manager');
 const ApiClient = require('./communication/api-client');
 const { WebSocketManager } = require('./communication/websocket-manager');
-const { unwrapPayload } = require('./communication/response-payload');
+const { applyHeartbeatResponse } = require('./communication/heartbeat-response');
 const BrowserController = require('./browser/controller');
 const CommandManager = require('./commands/manager');
 const { getVolume } = require('./commands/handlers/volume');
@@ -422,17 +422,10 @@ async function startHeartbeat() {
       stateManager.updateHeartbeat();
       logger.info('Heartbeat sent', { status: state.status, cpu: heartbeat.cpu_usage, mem: heartbeat.memory_usage, temp: heartbeat.temperature });
 
-      // Propagate diagnostic screenshot config from server response.
-      // apiClient.sendHeartbeat returns the response body, but HeartbeatResource
-      // is a Laravel API Resource wrapped in a `data` key, so the payload lives
-      // at res.data. unwrapPayload handles both shapes.
-      const heartbeatPayload = unwrapPayload(res);
-      if (screenshotScheduler && heartbeatPayload) {
-        screenshotScheduler.applyServerConfig({
-          enabled: heartbeatPayload.screenshot_enabled,
-          intervalSeconds: heartbeatPayload.screenshot_interval_seconds,
-        });
-      }
+      // Propagate diagnostic screenshot config from the server response.
+      // The unwrapping lives in applyHeartbeatResponse so it stays under test:
+      // see src/communication/heartbeat-response.js.
+      applyHeartbeatResponse(res, screenshotScheduler);
     } catch (error) {
       logger.error('Heartbeat failed', { error: error.message });
     }
