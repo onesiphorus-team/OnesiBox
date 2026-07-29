@@ -17,6 +17,13 @@ const CommandManager = require('./commands/manager');
 const { getVolume } = require('./commands/handlers/volume');
 const { getNetworkInfo, getDetailedMemory } = require('./utils/network-info');
 const ScreenshotScheduler = require('./diagnostics/screenshot-scheduler');
+const { listenWithRetry } = require('./http/server-listen');
+const { writeSecureResponse, sendSecureJson } = require('./http/secure-response');
+const { installProcessGuards } = require('./process/process-guards');
+
+// Installed before anything else so a failure during startup is logged with
+// its stack instead of vanishing into stderr. See src/process/process-guards.js.
+installProcessGuards();
 
 const execFileAsync = promisify(execFile);
 
@@ -42,28 +49,6 @@ const MIME_TYPES = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml'
 };
-
-/**
- * Security headers to include in all HTTP responses.
- * These headers help protect against common web vulnerabilities.
- */
-const SECURITY_HEADERS = {
-  'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
-  'X-XSS-Protection': '1; mode=block',
-  'Referrer-Policy': 'no-referrer',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; media-src *"
-};
-
-/**
- * Write HTTP response with security headers.
- * @param {http.ServerResponse} res - The response object
- * @param {number} statusCode - HTTP status code
- * @param {object} additionalHeaders - Additional headers to include
- */
-function writeSecureResponse(res, statusCode, additionalHeaders = {}) {
-  res.writeHead(statusCode, { ...SECURITY_HEADERS, ...additionalHeaders });
-}
 
 /**
  * Check if API request is authenticated.
@@ -92,11 +77,10 @@ function isApiAuthenticated(req) {
  * @param {http.ServerResponse} res - The response object
  */
 function sendUnauthorized(res) {
-  writeSecureResponse(res, 401, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  sendSecureJson(res, 401, {
     error: 'Unauthorized',
     message: 'Valid X-API-Key header required'
-  }));
+  });
 }
 
 let config;
@@ -105,6 +89,7 @@ let wsManager;
 let browserController;
 let commandManager;
 let screenshotScheduler;
+let serverListenHandle;
 let pollingInterval;
 let heartbeatInterval;
 let originalPollingIntervalMs;
@@ -118,22 +103,25 @@ function serveStatic(req, res) {
   const fullPath = path.join(WEB_DIR, filePath);
 
   if (!fullPath.startsWith(WEB_DIR)) {
-    writeSecureResponse(res, 403, { 'Content-Type': 'text/plain' });
-    res.end('Forbidden');
+    if (writeSecureResponse(res, 403, { 'Content-Type': 'text/plain' })) {
+      res.end('Forbidden');
+    }
     return;
   }
 
   fs.readFile(fullPath, (err, data) => {
     if (err) {
-      writeSecureResponse(res, 404, { 'Content-Type': 'text/plain' });
-      res.end('Not Found');
+      if (writeSecureResponse(res, 404, { 'Content-Type': 'text/plain' })) {
+        res.end('Not Found');
+      }
       return;
     }
 
     const ext = path.extname(fullPath);
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    writeSecureResponse(res, 200, { 'Content-Type': contentType });
-    res.end(data);
+    if (writeSecureResponse(res, 200, { 'Content-Type': contentType })) {
+      res.end(data);
+    }
   });
 }
 
@@ -179,12 +167,11 @@ async function getAppVersion() {
 
 function handleApiStatus(req, res) {
   const state = stateManager.getState();
-  writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
+  sendSecureJson(res, 200, {
     status: state.status,
     connectionStatus: state.connectionStatus,
     volume: state.volume
-  }));
+  });
 }
 
 async function handleApiSystemInfo(req, res) {
@@ -211,21 +198,22 @@ async function handleApiSystemInfo(req, res) {
       wifiSsid = wifiConnections[0].ssid || null;
     }
 
-    writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
+    sendSecureJson(res, 200, {
       version,
       ip: primaryIp,
       wifi: wifiSsid
-    }));
+    });
   } catch (error) {
     logger.warn('Failed to get system info', { error: error.message });
+    // sendSecureJson, not a bare writeHead: reaching this catch after the happy
+    // path already answered used to throw ERR_HTTP_HEADERS_SENT inside a
+    // floating promise, which since Node 15 kills the whole process.
     const version = await getAppVersion();
-    writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
+    sendSecureJson(res, 200, {
       version,
       ip: '--',
       wifi: null
-    }));
+    });
   }
 }
 
@@ -239,15 +227,13 @@ async function handleJwMediaProxy(req, res) {
   const mediaId = url.searchParams.get('mediaId');
 
   if (!lang || !mediaId) {
-    writeSecureResponse(res, 400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Missing lang or mediaId parameter' }));
+    sendSecureJson(res, 400, { error: 'Missing lang or mediaId parameter' });
     return;
   }
 
   // Validate parameters (prevent injection)
   if (!/^[A-Z]{1,3}$/i.test(lang) || !/^[\w-]+$/.test(mediaId)) {
-    writeSecureResponse(res, 400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid parameters' }));
+    sendSecureJson(res, 400, { error: 'Invalid parameters' });
     return;
   }
 
@@ -272,12 +258,15 @@ async function handleJwMediaProxy(req, res) {
     });
 
     const data = await fetchPromise;
-    writeSecureResponse(res, 200, { 'Content-Type': 'application/json' });
-    res.end(data);
+    // Raw CDN payload, already JSON: written as-is rather than re-serialised.
+    if (writeSecureResponse(res, 200, { 'Content-Type': 'application/json' })) {
+      res.end(data);
+    }
   } catch (error) {
     logger.warn('JW media proxy failed', { error: error.message, lang, mediaId });
-    writeSecureResponse(res, 502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Failed to fetch media data' }));
+    // Guarded for the same reason as handleApiSystemInfo: an error raised after
+    // the 200 was written must not become a fatal unhandled rejection.
+    sendSecureJson(res, 502, { error: 'Failed to fetch media data' });
   }
 }
 
@@ -482,6 +471,7 @@ async function shutdown(signal) {
   // Notify systemd we're stopping
   watchdog.stopping();
 
+  if (serverListenHandle) serverListenHandle.cancel();
   if (pollingInterval) clearInterval(pollingInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
@@ -545,8 +535,12 @@ async function main() {
   stateManager.setVolume(config.default_volume);
 
   const server = createServer();
-  server.listen(PORT, () => {
-    logger.info('HTTP server started', { port: PORT });
+  // listenWithRetry, not server.listen: a listener-less 'error' event (a busy
+  // port after a SIGKILL leaves a stale instance behind) is an uncaught
+  // exception that no try/catch here can reach, and five of them burn
+  // systemd's StartLimitBurst for good. See src/http/server-listen.js.
+  serverListenHandle = listenWithRetry(server, PORT, {
+    onListening: () => logger.info('HTTP server started', { port: PORT })
   });
 
   // Launch browser with standby screen on startup
