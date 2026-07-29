@@ -17,6 +17,7 @@ const CommandManager = require('./commands/manager');
 const { getVolume } = require('./commands/handlers/volume');
 const { getNetworkInfo, getDetailedMemory } = require('./utils/network-info');
 const ScreenshotScheduler = require('./diagnostics/screenshot-scheduler');
+const { listenWithRetry } = require('./http/server-listen');
 
 const execFileAsync = promisify(execFile);
 
@@ -105,6 +106,7 @@ let wsManager;
 let browserController;
 let commandManager;
 let screenshotScheduler;
+let serverListenHandle;
 let pollingInterval;
 let heartbeatInterval;
 let originalPollingIntervalMs;
@@ -482,6 +484,7 @@ async function shutdown(signal) {
   // Notify systemd we're stopping
   watchdog.stopping();
 
+  if (serverListenHandle) serverListenHandle.cancel();
   if (pollingInterval) clearInterval(pollingInterval);
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (pollDebounceTimer) clearTimeout(pollDebounceTimer);
@@ -545,8 +548,12 @@ async function main() {
   stateManager.setVolume(config.default_volume);
 
   const server = createServer();
-  server.listen(PORT, () => {
-    logger.info('HTTP server started', { port: PORT });
+  // listenWithRetry, not server.listen: a listener-less 'error' event (a busy
+  // port after a SIGKILL leaves a stale instance behind) is an uncaught
+  // exception that no try/catch here can reach, and five of them burn
+  // systemd's StartLimitBurst for good. See src/http/server-listen.js.
+  serverListenHandle = listenWithRetry(server, PORT, {
+    onListening: () => logger.info('HTTP server started', { port: PORT })
   });
 
   // Launch browser with standby screen on startup
