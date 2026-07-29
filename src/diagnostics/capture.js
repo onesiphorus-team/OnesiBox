@@ -23,6 +23,18 @@ function captureScreen({ quality = 75, timeoutMs = 8000 } = {}) {
       return reject(new Error(`spawn failed: ${err.code || err.message}`));
     }
 
+    // Once a child is killed (timeout, crash) its pipes are dead: any further
+    // write emits an async 'error' event (EPIPE) on the stream. Node turns an
+    // 'error' event without listeners into an uncaught exception, which would
+    // take the whole process down. Settlement is driven by the child
+    // 'error'/'close' handlers and by the timeout below, so a broken pipe only
+    // needs to be absorbed here.
+    const absorbPipeError = () => {};
+    for (const stream of [grim.stdin, grim.stdout, grim.stderr,
+      cwebp.stdin, cwebp.stdout, cwebp.stderr]) {
+      if (stream) stream.on('error', absorbPipeError);
+    }
+
     const chunks = [];
     let grimErr = Buffer.alloc(0);
     let cwebpErr = Buffer.alloc(0);
@@ -37,6 +49,9 @@ function captureScreen({ quality = 75, timeoutMs = 8000 } = {}) {
     }, timeoutMs);
 
     grim.stdout.on('data', (d) => {
+      // Writes to a dead pipe fail asynchronously: the EPIPE lands on the
+      // stdin 'error' listener registered above, never in this try/catch.
+      if (cwebp.stdin.destroyed) return;
       try { cwebp.stdin.write(d); } catch { /* cwebp may have died */ }
     });
     grim.stderr.on('data', (d) => { grimErr = Buffer.concat([grimErr, d]); });
