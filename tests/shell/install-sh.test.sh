@@ -142,9 +142,13 @@ else
     fi
 fi
 
-# --- 7. Con un terminale, l'input arriva da /dev/tty ------------------------
+# --- 7. Con un terminale, main() annuncia /dev/tty come sorgente ------------
+# Attenzione a cosa prova: che main() arrivi a init_input_source() e ne riporti
+# l'esito. NON prova che il descrittore 3 sia stato davvero aperto — il
+# messaggio è identico anche con `exec 3< /dev/tty` rotto. La lettura vera è
+# verificata al punto 11.
 if ! command -v python3 > /dev/null 2>&1; then
-    skip "pipe + terminale: le risposte vengono lette da /dev/tty" "python3 non disponibile"
+    skip "pipe + terminale: main() annuncia /dev/tty come sorgente" "python3 non disponibile"
 else
     PTY_OUT=$(python3 - "$INSTALL_SH" <<'PYEOF' 2>&1
 import os, pty, select, shlex, sys, time
@@ -174,9 +178,9 @@ sys.stdout.write(out.decode(errors="replace"))
 PYEOF
 )
     if grep -q "/dev/tty" <<< "$PTY_OUT"; then
-        pass "pipe + terminale: le risposte vengono lette da /dev/tty"
+        pass "pipe + terminale: main() annuncia /dev/tty come sorgente"
     else
-        fail "pipe + terminale: le risposte vengono lette da /dev/tty" "output: ${PTY_OUT:-<vuoto>}"
+        fail "pipe + terminale: main() annuncia /dev/tty come sorgente" "output: ${PTY_OUT:-<vuoto>}"
     fi
 fi
 
@@ -423,6 +427,93 @@ if grep -q "RISPOSTA=\[risposta-operatore\]" <<< "$STUB_OUT"; then
 else
     fail "il descrittore 3 continua a servire ask() dopo i comandi esterni" \
          "output: ${STUB_OUT:-<vuoto>}"
+fi
+
+# --- 11. init_input_source() apre davvero il descrittore 3 ------------------
+# I due `exec 3<` sono il meccanismo che fa funzionare l'installazione
+# interattiva: senza, ask()/ask_secret() leggono da un descrittore chiuso.
+# Nessun controllo statico li copre in modo utile, e il punto 7 non li
+# discrimina — INPUT_SOURCE viene assegnata comunque.
+#
+# Qui l'operatore viene simulato davvero: un pty fa da terminale di controllo,
+# la risposta viene digitata e si verifica che finisca nella variabile. Con un
+# `exec 3<` rotto, ask() legge da un descrittore non aperto, esce 3 e la riga
+# NOME=[…] non compare mai.
+#
+# install.sh viene caricato con `source` perché main(), da non root, si ferma
+# ai prerequisiti prima di qualsiasi domanda: passando da main() non si
+# arriverebbe mai a una ask().
+if ! command -v python3 > /dev/null 2>&1; then
+    skip "pipe + terminale: init_input_source() apre il descrittore 3 su /dev/tty" "python3 non disponibile"
+    skip "terminale: init_input_source() duplica lo stdin sul descrittore 3" "python3 non disponibile"
+else
+    cat > "$STUB_DIR/pty-harness.sh" << HARNESSEOF
+source "$INSTALL_SH"
+init_input_source || exit 9
+echo "SORGENTE=[\$INPUT_SOURCE]"
+ask NOME "   Nome [OnesiBox]: "
+echo "NOME=[\$NOME]"
+HARNESSEOF
+
+    # Esegue \$1 dentro un pty, digita la risposta quando compare il prompt e
+    # restituisce tutto ciò che il terminale ha visto.
+    pty_ask() {
+        python3 - "$1" << 'PYEOF' 2>&1
+import os, pty, select, sys, time
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp("bash", ["bash", "-c", sys.argv[1]])
+
+out = b""
+typed = False
+deadline = time.time() + 30
+while time.time() < deadline:
+    r, _, _ = select.select([fd], [], [], 0.5)
+    if not r:
+        if os.waitpid(pid, os.WNOHANG)[0]:
+            break
+        continue
+    try:
+        chunk = os.read(fd, 4096)
+    except OSError:
+        break
+    if not chunk:
+        break
+    out += chunk
+    if not typed and b"Nome [OnesiBox]" in out:
+        typed = True
+        time.sleep(0.2)
+        os.write(fd, b"Casa Nonna Maria\n")
+
+sys.stdout.write(out.decode(errors="replace"))
+PYEOF
+    }
+
+    # Ramo `exec 3< /dev/tty`: stdin è occupato dalla pipe, come con
+    # `curl … | sudo bash`, e le risposte devono arrivare dal terminale.
+    PTY_PIPE_OUT=$(pty_ask "cat '$STUB_DIR/pty-harness.sh' | bash")
+    if grep -q 'SORGENTE=\[/dev/tty' <<< "$PTY_PIPE_OUT" \
+        && grep -q 'NOME=\[Casa Nonna Maria\]' <<< "$PTY_PIPE_OUT"; then
+        pass "pipe + terminale: init_input_source() apre il descrittore 3 su /dev/tty"
+    else
+        fail "pipe + terminale: init_input_source() apre il descrittore 3 su /dev/tty" \
+             "la risposta digitata non è arrivata ad ask(): l'installazione interattiva" \
+             "sotto \`curl … | sudo bash\` non funziona" \
+             "output: ${PTY_PIPE_OUT:-<vuoto>}"
+    fi
+
+    # Ramo `exec 3<&0`: lo script è eseguito da file e stdin è già il terminale.
+    PTY_FILE_OUT=$(pty_ask "bash '$STUB_DIR/pty-harness.sh'")
+    if grep -q 'SORGENTE=\[terminale (stdin)' <<< "$PTY_FILE_OUT" \
+        && grep -q 'NOME=\[Casa Nonna Maria\]' <<< "$PTY_FILE_OUT"; then
+        pass "terminale: init_input_source() duplica lo stdin sul descrittore 3"
+    else
+        fail "terminale: init_input_source() duplica lo stdin sul descrittore 3" \
+             "la risposta digitata non è arrivata ad ask(): \`sudo ./install.sh\`" \
+             "da un terminale non funziona" \
+             "output: ${PTY_FILE_OUT:-<vuoto>}"
+    fi
 fi
 
 # --- Riepilogo --------------------------------------------------------------
