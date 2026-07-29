@@ -104,7 +104,6 @@ function buildJoinUrl(meetingUrl, participantName) {
   return `${webClientUrl}${separator}uname=${encodeURIComponent(participantName)}`;
 }
 
-
 /**
  * Parse Zoom URL to extract meeting details.
  *
