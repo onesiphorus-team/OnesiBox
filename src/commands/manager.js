@@ -25,6 +25,48 @@ const COMMAND_PRIORITY = {
   custom_script: 2
 };
 
+/**
+ * Maximum time a handler may take before the manager gives up on it.
+ *
+ * Nothing guarantees a handler settles: Playwright's page.evaluate() has no
+ * timeout of its own, so a wedged renderer can leave a handler pending forever
+ * and, without this guard, processing would stay true for the whole lifetime of
+ * the process (see issue #59).
+ *
+ * Budgets are sized on the slowest legitimate path of each command, on a
+ * Raspberry Pi over a slow connection, with margin:
+ * - play_media / play_stream_item: goToStandby (30s) + navigateTo (30s) +
+ *   waits on tiles/video (15s + 15s) + playback event reporting.
+ * - join_zoom: persistent context launch + goto with waitUntil networkidle
+ *   (30s) + selector fallbacks (4x5s) + join click (5s).
+ * - everything else: shell commands, file reads and single navigations, all
+ *   well under a minute.
+ */
+const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
+
+const COMMAND_TIMEOUTS_MS = {
+  play_media: 120_000,
+  play_stream_item: 120_000,
+  join_zoom: 180_000
+};
+
+function getCommandTimeoutMs(commandType) {
+  return COMMAND_TIMEOUTS_MS[commandType] ?? DEFAULT_COMMAND_TIMEOUT_MS;
+}
+
+/**
+ * Raised when a handler exceeds its budget. Carries EXECUTION_TIMEOUT (E010)
+ * so the server gets a meaningful ACK instead of a generic handler failure.
+ */
+class HandlerTimeoutError extends Error {
+  constructor(commandType, timeoutMs) {
+    super(`Handler for ${commandType} timed out after ${timeoutMs}ms`);
+    this.name = 'HandlerTimeoutError';
+    this.code = ERROR_CODES.EXECUTION_TIMEOUT;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 class CommandManager extends EventEmitter {
   constructor(apiClient, browserController) {
     super();
@@ -81,7 +123,7 @@ class CommandManager extends EventEmitter {
       });
 
       // Handler may return result data (for diagnostic commands like get_system_info, get_logs)
-      const result = await handler(command, this.browserController);
+      const result = await this._runHandlerWithTimeout(command, handler);
 
       await this._sendAck(command.id, { status: 'success', result: result || null });
       this.emit('commandExecuted', { command, status: 'success', result });
@@ -94,11 +136,69 @@ class CommandManager extends EventEmitter {
 
       await this._sendAck(command.id, {
         status: 'failed',
-        error_code: getErrorCodeForCommandType(command.type),
+        error_code: error instanceof HandlerTimeoutError
+          ? ERROR_CODES.EXECUTION_TIMEOUT
+          : getErrorCodeForCommandType(command.type),
         error_message: error.message
       });
       this.emit('commandExecuted', { command, status: 'failed', error });
     }
+  }
+
+  /**
+   * Run a handler, giving up on it once its budget expires.
+   *
+   * A handler that blows the budget is abandoned, not cancelled: there is no
+   * way to cancel a pending promise. It keeps running in the background, so we
+   * keep a listener on it to log its late outcome and to stop a late rejection
+   * from becoming an unhandled rejection. What matters is that the caller gets
+   * control back and processing is released.
+   *
+   * @param {object} command - The command being executed
+   * @param {Function} handler - The registered handler
+   * @returns {Promise<*>} The handler result, or a rejection on timeout
+   */
+  _runHandlerWithTimeout(command, handler) {
+    const timeoutMs = getCommandTimeoutMs(command.type);
+    // Wrapped so a handler throwing synchronously becomes a rejection too.
+    const handlerPromise = (async () => handler(command, this.browserController))();
+
+    let timer = null;
+    const timeoutPromise = new Promise((_resolve, reject) => {
+      // Deliberately not unref'd: while a command is in flight there is real
+      // pending work, and an unref'd timer would let the process exit (or the
+      // timeout simply never fire) before the ACK is sent. It is always
+      // cleared below, so it cannot outlive the command.
+      timer = setTimeout(
+        () => reject(new HandlerTimeoutError(command.type, timeoutMs)),
+        timeoutMs
+      );
+    });
+
+    return Promise.race([handlerPromise, timeoutPromise])
+      .catch((error) => {
+        if (error instanceof HandlerTimeoutError) {
+          logger.error('Command handler timed out, abandoning it', {
+            id: command.id,
+            type: command.type,
+            timeout_ms: timeoutMs
+          });
+
+          handlerPromise.then(
+            () => logger.warn('Abandoned handler settled after its timeout', {
+              id: command.id,
+              type: command.type
+            }),
+            (lateError) => logger.warn('Abandoned handler failed after its timeout', {
+              id: command.id,
+              type: command.type,
+              error: lateError && lateError.message
+            })
+          );
+        }
+        throw error;
+      })
+      .finally(() => clearTimeout(timer));
   }
 
   async processCommands(commands) {
@@ -147,3 +247,7 @@ class CommandManager extends EventEmitter {
 }
 
 module.exports = CommandManager;
+module.exports.HandlerTimeoutError = HandlerTimeoutError;
+module.exports.DEFAULT_COMMAND_TIMEOUT_MS = DEFAULT_COMMAND_TIMEOUT_MS;
+module.exports.COMMAND_TIMEOUTS_MS = COMMAND_TIMEOUTS_MS;
+module.exports.getCommandTimeoutMs = getCommandTimeoutMs;
