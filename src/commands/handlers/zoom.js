@@ -4,6 +4,7 @@ const os = require('os');
 const logger = require('../../logging/logger');
 const { stateManager, STATUS } = require('../../state/state-manager');
 const { isZoomUrl } = require('../validator');
+const { DISABLED_FEATURES, NO_KEYRING_ARGS } = require('../../browser/chromium-args');
 
 // Directory for persistent browser profile
 const USER_DATA_DIR = path.join(os.homedir(), '.onesibox-zoom');
@@ -350,7 +351,8 @@ async function joinZoom(command, browserController) {
         '--disable-dev-shm-usage',
         '--start-fullscreen',
         '--autoplay-policy=no-user-gesture-required',
-        '--password-store=basic',
+        `--disable-features=${DISABLED_FEATURES.join(',')}`,
+        ...NO_KEYRING_ARGS,
       ],
       permissions: ['microphone', 'camera'],
       viewport: null, // Fullscreen

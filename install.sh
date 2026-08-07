@@ -1073,6 +1073,64 @@ EOF
 }
 
 # ============================================================================
+# Hardening Chromium: niente keyring, niente traduzione automatica
+# ============================================================================
+
+setup_chromium_hardening() {
+    print_step "Configurazione Chromium (keyring e traduzione)"
+
+    # Policy di sistema: vale anche per avvii manuali del browser e sopravvive
+    # a un flag da riga di comando perso o sovrascritto.
+    local policy_written=false
+    for policy_base in /etc/chromium /etc/chromium-browser /etc/opt/chrome; do
+        [ -d "$policy_base" ] || continue
+
+        mkdir -p "$policy_base/policies/managed"
+        cat > "$policy_base/policies/managed/onesibox.json" << 'EOF'
+{
+  "TranslateEnabled": false,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "DefaultNotificationsSetting": 2,
+  "PromptForDownloadLocation": false
+}
+EOF
+        chmod 644 "$policy_base/policies/managed/onesibox.json"
+        policy_written=true
+    done
+
+    if [ "$policy_written" = true ]; then
+        print_success "Policy Chromium installata (traduzione e password manager disattivati)"
+    else
+        print_warning "Nessuna directory di policy Chromium trovata"
+    fi
+
+    # gnome-keyring: il prompt di sblocco e' modale e in kiosk blocca l'avvio
+    # del browser, mandando Playwright in timeout.
+    for unit in gnome-keyring-daemon.service gnome-keyring-daemon.socket; do
+        systemctl --global mask "$unit" 2>/dev/null || true
+    done
+
+    local autostart_dir="$KIOSK_USER_HOME/.config/autostart"
+    mkdir -p "$autostart_dir"
+    for desktop in gnome-keyring-pkcs11 gnome-keyring-secrets gnome-keyring-ssh; do
+        [ -f "/etc/xdg/autostart/$desktop.desktop" ] || continue
+        cat > "$autostart_dir/$desktop.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=$desktop (disabilitato da OnesiBox)
+Exec=/bin/true
+Hidden=true
+X-GNOME-Autostart-enabled=false
+EOF
+    done
+    chown -R "$KIOSK_USER:$KIOSK_USER" "$autostart_dir"
+
+    print_success "gnome-keyring disattivato"
+}
+
+# ============================================================================
 # Configurazione aggiornamenti automatici
 # ============================================================================
 
@@ -1208,6 +1266,7 @@ main() {
     create_configuration
     setup_systemd_service
     setup_kiosk_autologin
+    setup_chromium_hardening
     setup_auto_updates
     start_and_test
     print_summary
