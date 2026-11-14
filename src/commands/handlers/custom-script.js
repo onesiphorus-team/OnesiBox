@@ -102,12 +102,31 @@ async function executeCustomScript(command) {
       signal: err.signal,
       message: err.message,
     });
-    throw new HandlerError(ERROR_CODES.CUSTOM_SCRIPT_FAILED, `script ${scriptName} exited with ${err.code}`);
+    const motivo = ultimaRigaUtile(err.stderr);
+    throw new HandlerError(
+      ERROR_CODES.CUSTOM_SCRIPT_FAILED,
+      `script ${scriptName} exited with ${err.code}${motivo ? `: ${motivo}` : ''}`
+    );
   }
+}
+
+/**
+ * L'ultima riga non vuota dello stderr di uno script, accorciata: e' quella che
+ * di solito spiega il problema (es. "[to-box] TV non raggiungibile") e finisce
+ * nel messaggio d'errore che il server mostra e manda su Telegram.
+ *
+ * @param {string|Buffer|undefined} stderr
+ * @returns {string}
+ */
+function ultimaRigaUtile(stderr) {
+  const righe = String(stderr || '').split(/\r?\n/).map((riga) => riga.trim()).filter(Boolean);
+  const ultima = righe[righe.length - 1] || '';
+  return ultima.length > 200 ? `${ultima.slice(0, 197)}...` : ultima;
 }
 
 module.exports = {
   executeCustomScript,
+  ultimaRigaUtile,
   SCRIPTS_DIR,
   NAME_RE,
   TIMEOUT_MS,
