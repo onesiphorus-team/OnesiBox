@@ -33,6 +33,11 @@ const MEETING_ENDED_PHRASES = [
   'è stata terminata dall',
 ];
 
+// Se il pulsante "Join Audio by Computer" resta a schermo cosi' a lungo
+// nonostante il riaggancio automatico (che lo preme ogni 3 secondi), la
+// riunione e' davvero senza audio: lo si riferisce al server, che avvisa.
+const AUDIO_PERSO_DOPO_MS = 45_000;
+
 // Playwright browser context (persists between calls)
 let browserContext = null;
 let page = null;
@@ -291,6 +296,7 @@ async function runEndDetectionTick(browserController) {
 
     const ended = await checkMeetingEnded(activePage);
     if (!ended) {
+      await aggiornaStatoAudio(activePage);
       return;
     }
 
@@ -315,6 +321,40 @@ async function runEndDetectionTick(browserController) {
   } finally {
     endDetectionTicking = false;
   }
+}
+
+/**
+ * Legge dalla pagina della riunione se Zoom ha l'audio collegato e lo salva
+ * nello stato, che il heartbeat riferisce al server.
+ *
+ * "Senza audio" solo se il pulsante "Join Audio by Computer" e' rimasto a
+ * schermo per AUDIO_PERSO_DOPO_MS nonostante il riaggancio automatico. Se la
+ * pagina non risponde o il presidio non e' partito, l'esito resta ignoto
+ * (null): meglio nessun avviso che un falso allarme.
+ *
+ * @param {import('playwright').Page} activePage
+ */
+async function aggiornaStatoAudio(activePage) {
+  let letto = null;
+  try {
+    letto = await activePage.evaluate(() => ({
+      presidioAttivo: !!window.__onesiboxVistaTimer,
+      assenteDaMs: window.__onesiboxAudioAssenteDa ? Date.now() - window.__onesiboxAudioAssenteDa : 0,
+      riagganci: window.__onesiboxRiagganciAudio || 0,
+    }));
+  } catch {
+    letto = null;
+  }
+
+  if (!letto || !letto.presidioAttivo) {
+    stateManager.setMeetingAudio({ audioConnected: null, audioReconnects: null });
+    return;
+  }
+
+  stateManager.setMeetingAudio({
+    audioConnected: letto.assenteDaMs < AUDIO_PERSO_DOPO_MS,
+    audioReconnects: letto.riagganci,
+  });
 }
 
 /**
@@ -385,6 +425,13 @@ async function nascondiPartecipantiSecondari(page) {
         if (riagganciato) {
           window.__onesiboxRiagganciAudio = (window.__onesiboxRiagganciAudio || 0) + 1;
           console.log('[onesibox] riagganciato audio premendo:', riagganciato);
+        }
+        // Da quando il pulsante dell'audio e' visibile senza interruzioni: se
+        // il clic funziona sparisce al giro dopo e il conteggio si azzera.
+        if (riagganciato) {
+          window.__onesiboxAudioAssenteDa = window.__onesiboxAudioAssenteDa || Date.now();
+        } else {
+          window.__onesiboxAudioAssenteDa = null;
         }
 
         // Il riaggancio audio va sempre fatto; nascondere le miniature invece
@@ -1100,4 +1147,6 @@ module.exports = {
   stopMeetingEndDetection,
   END_DETECTION_START_DELAY_MS,
   END_DETECTION_POLL_INTERVAL_MS,
+  AUDIO_PERSO_DOPO_MS,
+  aggiornaStatoAudio,
 };

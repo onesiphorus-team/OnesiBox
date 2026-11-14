@@ -114,6 +114,20 @@ class StateManager extends EventEmitter {
     this.setStatus(STATUS.CALLING);
   }
 
+  /**
+   * Stato dell'audio di Zoom nella riunione in corso (vedi aggiornaStatoAudio
+   * in handlers/zoom.js). null = ignoto.
+   *
+   * @param {{ audioConnected: boolean|null, audioReconnects: number|null }} audio
+   */
+  setMeetingAudio({ audioConnected, audioReconnects }) {
+    if (!this.currentMeeting) {
+      return;
+    }
+    this.currentMeeting.audio_connected = audioConnected;
+    this.currentMeeting.audio_reconnects = audioReconnects;
+  }
+
   leaveMeeting() {
     this.currentMeeting = null;
     this.setStatus(STATUS.IDLE);
