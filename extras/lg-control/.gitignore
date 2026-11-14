@@ -1,0 +1,9 @@
+# Dati del singolo impianto: non vanno nel repository (pubblico).
+# - lg-key-*: chiave di abbinamento rilasciata dalla TV alla prima connessione
+# - .tv-mac:  MAC della TV di casa
+lg-key-*
+.tv-mac
+lg-control.log*
+node_modules/
+*.bak
+*.bak-*

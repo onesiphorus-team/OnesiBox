@@ -26,6 +26,19 @@ const COMMAND_PRIORITY = {
 };
 
 /**
+ * Commands that prepare the box for content, e.g. the custom script that switches the TV to
+ * the OnesiBox input, are flagged by the server with payload.run_in_background. They start
+ * immediately without holding up the queue, so a slow or unreachable TV never delays the
+ * video or the meeting they prepare.
+ *
+ * @param {object} command
+ * @returns {boolean}
+ */
+function runsInBackground(command) {
+  return command?.type === 'custom_script' && command.payload?.run_in_background === true;
+}
+
+/**
  * Maximum time a handler may take before the manager gives up on it.
  *
  * Nothing guarantees a handler settles: Playwright's page.evaluate() has no
@@ -37,8 +50,9 @@ const COMMAND_PRIORITY = {
  * Raspberry Pi over a slow connection, with margin:
  * - play_media / play_stream_item: goToStandby (30s) + navigateTo (30s) +
  *   waits on tiles/video (15s + 15s) + playback event reporting.
- * - join_zoom: persistent context launch + goto with waitUntil networkidle
- *   (30s) + selector fallbacks (4x5s) + join click (5s).
+ * - join_zoom: kiosk parked on about:blank (10s) + persistent context launch
+ *   + goto with waitUntil domcontentloaded (60s) + selector fallbacks (4x5s)
+ *   + join click (5s).
  * - everything else: shell commands, file reads and single navigations, all
  *   well under a minute.
  */
@@ -53,6 +67,24 @@ const COMMAND_TIMEOUTS_MS = {
 function getCommandTimeoutMs(commandType) {
   return COMMAND_TIMEOUTS_MS[commandType] ?? DEFAULT_COMMAND_TIMEOUT_MS;
 }
+
+/**
+ * How long a finished command id is remembered to drop late duplicates.
+ *
+ * The same command reaches the device twice by design: the WebSocket event
+ * executes it immediately, while the server keeps it "pending" until the ACK,
+ * which is sent only when the handler finishes. Every fallback poll that runs
+ * in between (every 30s with WebSocket connected) fetches it again. On a
+ * Raspberry Pi 4 a Zoom join takes ~90s, so two or three copies of the same
+ * join_zoom ran concurrently, each closing the other's browser: nobody
+ * actually got into the meeting. A Pi 5 joins fast enough to ACK before the
+ * next poll, which is why the bug only ever showed on the Pi 4.
+ *
+ * After completion the ACK may still be in flight or queued for retry, so the
+ * id is kept for a while longer instead of being forgotten immediately.
+ */
+const RECENT_COMMAND_TTL_MS = 10 * 60 * 1000;
+const RECENT_COMMAND_MAX = 500;
 
 /**
  * Raised when a handler exceeds its budget. Carries EXECUTION_TIMEOUT (E010)
@@ -75,6 +107,35 @@ class CommandManager extends EventEmitter {
     this.handlers = new Map();
     this.processing = false;
     this.pendingBatches = [];
+    // Command ids currently executing, and recently finished ones (id -> ms
+    // timestamp). See RECENT_COMMAND_TTL_MS for why both are needed.
+    this.inFlightIds = new Set();
+    this.recentIds = new Map();
+  }
+
+  /**
+   * Whether this command id is already running or finished recently.
+   * Commands without an id cannot be matched and are never treated as
+   * duplicates.
+   */
+  _isDuplicate(id) {
+    if (!id) return false;
+    if (this.inFlightIds.has(id)) return true;
+    const finishedAt = this.recentIds.get(id);
+    return finishedAt !== undefined && Date.now() - finishedAt < RECENT_COMMAND_TTL_MS;
+  }
+
+  _rememberFinished(id) {
+    if (!id) return;
+    this.inFlightIds.delete(id);
+    this.recentIds.set(id, Date.now());
+
+    // Map preserves insertion order: the oldest entries come first.
+    const cutoff = Date.now() - RECENT_COMMAND_TTL_MS;
+    for (const [oldId, finishedAt] of this.recentIds) {
+      if (finishedAt >= cutoff && this.recentIds.size <= RECENT_COMMAND_MAX) break;
+      this.recentIds.delete(oldId);
+    }
   }
 
   registerHandler(commandType, handler) {
@@ -83,6 +144,25 @@ class CommandManager extends EventEmitter {
   }
 
   async processCommand(command) {
+    const id = command && command.id;
+    if (this._isDuplicate(id)) {
+      // No ACK here: the first copy owns the command and will ACK it.
+      logger.info('Duplicate command ignored (already running or just executed)', {
+        id,
+        type: command.type
+      });
+      return;
+    }
+
+    if (id) this.inFlightIds.add(id);
+    try {
+      await this._processCommandOnce(command);
+    } finally {
+      this._rememberFinished(id);
+    }
+  }
+
+  async _processCommandOnce(command) {
     const validation = validateCommand(command);
 
     if (!validation.valid) {
@@ -218,6 +298,13 @@ class CommandManager extends EventEmitter {
       });
 
       for (const command of sorted) {
+        if (runsInBackground(command)) {
+          // Started, not awaited: the next command (usually the content it prepares) starts right away.
+          this.processCommand(command).catch((error) => {
+            logger.error('Background command failed', { id: command.id, type: command.type, error: error.message });
+          });
+          continue;
+        }
         await this.processCommand(command);
       }
     } finally {

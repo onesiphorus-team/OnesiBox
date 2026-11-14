@@ -2,13 +2,14 @@
 Description=OnesiBox Client
 After=network-online.target graphical.target
 Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# Nessun limite ai riavvii (vedi install.sh, setup_systemd_service)
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 # User will be set dynamically by install.sh based on detected kiosk user
 User=admin
+ExecStartPre=/opt/onesibox/scripts/wait-for-compositor.sh
 ExecStart=/usr/bin/node /opt/onesibox/src/main.js
 Restart=always
 RestartSec=10

@@ -962,12 +962,16 @@ setup_systemd_service() {
 Description=OnesiBox Client - $DEVICE_NAME
 After=network-online.target graphical.target
 Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# Nessun limite ai riavvii: con un limite, pochi fallimenti ravvicinati
+# lasciano l'unita' "failed" per sempre, e in casa dell'utente nessuno puo'
+# dare un systemctl reset-failed.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=$KIOSK_USER
+# Attende che il compositor Wayland accetti connessioni (vedi lo script).
+ExecStartPre=$INSTALL_DIR/scripts/wait-for-compositor.sh
 ExecStart=/usr/bin/node $INSTALL_DIR/src/main.js
 Restart=always
 RestartSec=10
@@ -994,6 +998,14 @@ EOF
     run_system systemctl daemon-reload
     run_system systemctl enable onesibox
     print_success "Servizio abilitato all'avvio"
+
+    # Stesse ottimizzazioni che updates/007 applica ai box gia' installati.
+    print_info "Ottimizzazioni di sistema (audio, journal, swap, CPU su Pi 4)..."
+    if INSTALL_DIR="$INSTALL_DIR" run_system bash "$INSTALL_DIR/scripts/system-tuning.sh" "$KIOSK_USER"; then
+        print_success "Ottimizzazioni di sistema applicate"
+    else
+        print_warning "Ottimizzazioni di sistema non applicate del tutto (non bloccante)"
+    fi
 }
 
 # ============================================================================
@@ -1045,13 +1057,26 @@ EOF
     LABWC_CONFIG_DIR="$KIOSK_USER_HOME/.config/labwc"
     mkdir -p "$LABWC_CONFIG_DIR"
 
+    # Sul Pi 4 il 1080p e' troppo pesante con due Chromium aperti (kiosk +
+    # Zoom): si scende a 720p. Va impostato PRIMA di avviare il servizio,
+    # altrimenti il browser nasce alla risoluzione precedente. Se in riunione
+    # fosse ancora pesante, 800x600@60.317001 e' la risoluzione con cui gira
+    # il box Pi 4 di riferimento.
+    local resolution_block=""
+    if tr -d '\0' < /proc/device-tree/model 2>/dev/null | grep -q "Raspberry Pi 4"; then
+        resolution_block="# Raspberry Pi 4: risoluzione ridotta per alleggerire Chromium durante Zoom
+wlr-randr --output HDMI-A-1 --mode 1280x720@60 2>/dev/null || true
+"
+        print_info "Raspberry Pi 4 rilevato: risoluzione impostata a 1280x720"
+    fi
+
     cat > "$LABWC_CONFIG_DIR/autostart" << EOF
 # OnesiBox labwc autostart
 # Export environment variables for Wayland
 systemctl --user import-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR 2>/dev/null || true
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_RUNTIME_DIR 2>/dev/null || true
 
-# Wait for Wayland to be ready, then restart OnesiBox service
+${resolution_block}# Wait for Wayland to be ready, then restart OnesiBox service
 sleep 2
 sudo systemctl restart onesibox &
 EOF

@@ -391,7 +391,13 @@ async function startHeartbeat() {
         current_meeting: state.currentMeeting ? {
           meeting_id: state.currentMeeting.meeting_id,
           meeting_url: state.currentMeeting.meeting_url,
-          joined_at: state.currentMeeting.joined_at
+          joined_at: state.currentMeeting.joined_at,
+          // Presenti solo quando il presidio della riunione e' attivo: il
+          // server avvisa se Zoom resta senza audio.
+          ...(typeof state.currentMeeting.audio_connected === 'boolean' ? {
+            audio_connected: state.currentMeeting.audio_connected,
+            audio_reconnects: state.currentMeeting.audio_reconnects,
+          } : {})
         } : null,
         volume: state.volume,
         cpu_usage: Math.round(cpu.currentLoad),

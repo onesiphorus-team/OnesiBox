@@ -103,8 +103,9 @@ async function playMedia(command, browserController) {
     stateManager.setPaused(true);
   }
 
-  // Start video completion detection for video media
-  if (media_type === 'video') {
+  // Start completion detection: player.html flags the end for both video and audio,
+  // so timed sessions can advance to the next item for either media type
+  if (media_type === 'video' || media_type === 'audio') {
     startVideoEndedDetection(browserController, mediaInfo);
   }
 }

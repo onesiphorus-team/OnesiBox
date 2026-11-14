@@ -20,7 +20,9 @@ export default [
         clearTimeout: 'readonly',
         clearInterval: 'readonly',
         URL: 'readonly',
-        document: 'readonly'
+        // Used inside page.evaluate() callbacks, which run in the browser.
+        document: 'readonly',
+        window: 'readonly'
       }
     },
     rules: {

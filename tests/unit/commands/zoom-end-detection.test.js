@@ -142,6 +142,8 @@ describe('joinZoom + end detection lifecycle', () => {
       click: jest.fn().mockResolvedValue(undefined),
       waitForTimeout: jest.fn().mockResolvedValue(undefined),
       screenshot: jest.fn().mockResolvedValue(undefined),
+      // joinZoom aggancia console e pageerror di Zoom al log.
+      on: jest.fn(),
     };
 
     fakeContext = {

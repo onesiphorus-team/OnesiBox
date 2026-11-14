@@ -54,3 +54,5 @@ echo "Completato"
 | 003 | create-zoom-directory | Crea la directory ~/.onesibox-zoom per il client Zoom web |
 | 004 | install-playwright-browser | Installa il browser Playwright necessario per Zoom |
 | 005 | fix-zoom-directory-permissions | Aggiunge ~/.onesibox-zoom a ReadWritePaths per Zoom |
+| 006 | install-grim-webp | Installa grim e cwebp per gli screenshot diagnostici |
+| 007 | system-tuning-pi4-pi5 | Esegue `scripts/system-tuning.sh`: attesa del compositor e riavvii illimitati per il servizio, audio senza sospensione, journal persistente, swappiness 10, governor `performance` solo su Pi 4 |
