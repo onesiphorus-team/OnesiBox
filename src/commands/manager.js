@@ -26,6 +26,19 @@ const COMMAND_PRIORITY = {
 };
 
 /**
+ * Commands that prepare the box for content, e.g. the custom script that switches the TV to
+ * the OnesiBox input, are flagged by the server with payload.run_in_background. They start
+ * immediately without holding up the queue, so a slow or unreachable TV never delays the
+ * video or the meeting they prepare.
+ *
+ * @param {object} command
+ * @returns {boolean}
+ */
+function runsInBackground(command) {
+  return command?.type === 'custom_script' && command.payload?.run_in_background === true;
+}
+
+/**
  * Maximum time a handler may take before the manager gives up on it.
  *
  * Nothing guarantees a handler settles: Playwright's page.evaluate() has no
@@ -285,6 +298,13 @@ class CommandManager extends EventEmitter {
       });
 
       for (const command of sorted) {
+        if (runsInBackground(command)) {
+          // Started, not awaited: the next command (usually the content it prepares) starts right away.
+          this.processCommand(command).catch((error) => {
+            logger.error('Background command failed', { id: command.id, type: command.type, error: error.message });
+          });
+          continue;
+        }
         await this.processCommand(command);
       }
     } finally {
