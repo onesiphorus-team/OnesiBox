@@ -4,6 +4,7 @@ const os = require('os');
 const logger = require('../../logging/logger');
 const { stateManager, STATUS } = require('../../state/state-manager');
 const { isZoomUrl } = require('../validator');
+const { markProfileCleanExit } = require('../../browser/profile-crash-state');
 
 // Directory for persistent browser profile
 const USER_DATA_DIR = path.join(os.homedir(), '.onesibox-zoom');
@@ -340,10 +341,17 @@ async function joinZoom(command, browserController) {
     // Close existing context if any
     await closeBrowserContext();
 
+    // La box viene spenta staccando la corrente: senza questo Chromium apre il
+    // fumetto "Restore pages?" sopra la riunione, e nessuno puo' chiuderlo.
+    markProfileCleanExit(USER_DATA_DIR);
+
     // Launch browser with persistent context for camera/mic permissions
     browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, {
       headless: false,
       args: [
+        // Seconda difesa contro lo stesso fumetto, se il profilo non fosse
+        // correggibile. --disable-session-crashed-bubble non esiste piu'.
+        '--hide-crash-restore-bubble',
         '--disable-blink-features=AutomationControlled',
         '--no-sandbox',
         '--disable-setuid-sandbox',
